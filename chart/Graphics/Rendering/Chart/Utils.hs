@@ -56,7 +56,7 @@ data LUT a =
 
 -- | Create a look-up table.
 toLUT :: 
-  [a] -- ^ items to add to the table; must not be empty.
+  [a] -- ^ items to add to the table; @Nothing@ is returned if the list is empty.
   -> Maybe (LUT a)
 toLUT [] = Nothing
 toLUT xs = Just LUT { 
@@ -87,7 +87,6 @@ fromLUT l f =
 --   D.A. Green, 'A colour scheme for the display of astronomical intensity images'
 --   <http://adsabs.harvard.edu/abs/2011BASI...39..289G>
 --     
---   At present 
 cubeHelix ::
   Double     -- ^ start
   -> Double  -- ^ number of rotations
@@ -134,11 +133,16 @@ cubeHelix start nrots hue gamma nlev clip =
 --   parameter values:
 --
 --    - start = 0.5
+--
 --    - nrots = -1.5
+--
 --    - hue = 1.0
+--
 --    - gamma = 1.0
+--
 --    - nlevels = 256
---    - clip=True
+--
+--    - clip = True
 --       
 cubeHelix0 :: LUT (Colour Double)
 cubeHelix0 = fromJust $ cubeHelix 0.5 (-1.5) 1.0 1.0 256 True

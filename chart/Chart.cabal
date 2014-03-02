@@ -12,6 +12,8 @@ Category: Graphics
 Cabal-Version: >= 1.6
 Build-Type: Simple
 
+extra-doc-files: docimages/*.svg
+
 library
   Build-depends: base >= 3 && < 5
                , old-locale
@@ -52,6 +54,7 @@ library
         Graphics.Rendering.Chart.Plot.Lines,
         Graphics.Rendering.Chart.Plot.Pie,
         Graphics.Rendering.Chart.Plot.Points
+        Graphics.Rendering.Chart.Plot.Polar
         Graphics.Rendering.Chart.SparkLine
         Graphics.Rendering.Chart.Backend
         Graphics.Rendering.Chart.Backend.Impl

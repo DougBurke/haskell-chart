@@ -14,15 +14,8 @@ module Graphics.Rendering.Chart.Axis.Internal(
   , stepsInt
   , chooseStep
   , logTicks
+  , scaleLinear
 ) where
-
-{-
-import Data.Default.Class
-
-import Graphics.Rendering.Chart.Drawing
-import Graphics.Rendering.Chart.Utils
-import Graphics.Rendering.Chart.Axis.Types
--}
 
 import Data.List (genericLength, minimumBy)
 import Data.Ord (comparing)
@@ -30,7 +23,7 @@ import Data.Ord (comparing)
 import Numeric (showFFloat)
 
 import Graphics.Rendering.Chart.Geometry (Range)
-import Graphics.Rendering.Chart.Utils (log10)
+import Graphics.Rendering.Chart.Utils (isValidNumber, log10)
 
 -- using minV,maxV (for minVal,maxVal) to avoid shadowing min and max
 
@@ -150,3 +143,40 @@ logTicks (low,high) = (major,minor,major)
   pf :: RealFrac a => a -> (Integer, a)
   pf = properFraction
   
+{- 
+Create grid values for a linear axis, based on scaledAxis; the code
+in scaledAxis should probably be refactored to use these.
+-}
+
+-- Select a suitable range for the axis, given the points to plot,
+-- which can be empty.
+linearRange :: 
+  (Eq a, Fractional a) =>
+  (a, a)    -- ^ bounds of data (used when the data contains at least 1 valid element)   
+  -> [a]    -- ^ data (only use is to check if null or not)
+  -> (a, a) -- ^ bounds to use
+linearRange _ [] = (0,1)
+linearRange r@(minval,maxval) _ 
+  | minval == maxval = if minval == 0 then (-1,1) else 
+                         let d = abs (minval * 0.01) in (minval-d, maxval+d)
+  | otherwise  = r
+
+-- why bother sending in both the bounds and the data in; would it not make sense
+-- to have the caller perform the linearRange logic first?
+scaleLinear :: 
+  RealFloat a =>
+  (Int, Int)          -- ^ num labels, num ticks
+  -> (a, a)           -- ^ min,max bounds
+  -> [a]              -- ^ data values
+  -> ([a], [a], [a])  -- ^ tick, label, grid positions 
+scaleLinear (nLabels,nTicks) rng ps0 = 
+  let ps = filter isValidNumber ps0
+      lr = linearRange rng ps
+      tr = (minimum labelvs, maximum labelvs)
+      
+      labelvs = map fromRational $ steps (fromIntegral nLabels) lr 
+      tickvs  = map fromRational $ steps (fromIntegral nTicks) tr
+      gridvs  = labelvs
+      
+  in (labelvs, gridvs, tickvs)
+

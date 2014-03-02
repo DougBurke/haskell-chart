@@ -1,7 +1,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Graphics.Rendering.Chart.Plot
--- Copyright   :  (c) Tim Docker 2006
+-- Copyright   :  (c) Tim Docker 2006-2014
 -- License     :  BSD-style (see chart/COPYRIGHT)
 --
 -- Code to calculate and render various types of plots.
@@ -19,6 +19,7 @@ module Graphics.Rendering.Chart.Plot(
     module Graphics.Rendering.Chart.Plot.Annotation,
     module Graphics.Rendering.Chart.Plot.AreaSpots,
     module Graphics.Rendering.Chart.Plot.Pie,
+    module Graphics.Rendering.Chart.Plot.Polar,
 ) where
 
 import Graphics.Rendering.Chart.Plot.Types
@@ -32,3 +33,4 @@ import Graphics.Rendering.Chart.Plot.Hidden
 import Graphics.Rendering.Chart.Plot.Annotation
 import Graphics.Rendering.Chart.Plot.AreaSpots
 import Graphics.Rendering.Chart.Plot.Pie
+import Graphics.Rendering.Chart.Plot.Polar

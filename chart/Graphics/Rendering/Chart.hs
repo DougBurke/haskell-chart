@@ -1,7 +1,7 @@
 ----------------------------------------------------------------------------
 -- |
 -- Module      :  Graphics.Rendering.Chart
--- Copyright   :  (c) Tim Docker 2006-2013
+-- Copyright   :  (c) Tim Docker 2006-2014
 -- License     :  BSD-style (see chart/COPYRIGHT)
 --
 -- A framework for creating 2D charts in Haskell.
@@ -12,14 +12,16 @@
 -- calling a function in an appropriate graphics backend, eg
 -- 'renderableToFile'.
 --
--- Currently, there are three types of charts:
+-- Currently, there are four types of charts:
 --
 --     * 'Layout' is a standard XY chart
 -- 
 --     * 'LayoutLR' is an XY chart with independent left
 --       and right axes
 --
---     *  'PieLayout' is a pie chart
+--     * 'PieLayout' is a pie chart
+--
+--     * 'PolarLayout' is a (very limited) polar plot
 --
 -- 'Layout' and 'LayoutLR' charts can be stacked vertically using
 -- the 'StackedLayouts' type.
