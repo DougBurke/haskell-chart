@@ -12,11 +12,11 @@ module Graphics.Rendering.Chart.Axis.Int(
     autoScaledIntAxis
 ) where
 
-import Data.List(genericLength)
-import Graphics.Rendering.Chart.Geometry
-import Graphics.Rendering.Chart.Drawing
 import Graphics.Rendering.Chart.Axis.Types
 import Graphics.Rendering.Chart.Axis.Floating
+import Graphics.Rendering.Chart.Axis.Internal (stepsInt)
+
+import Prelude hiding (min, max)
 
 instance PlotValue Int where
     toValue    = fromIntegral
@@ -56,22 +56,4 @@ scaledIntAxis lap (min,max) ps =
                                   , fromIntegral $ maximum labelvs )
     gridvs    = labelvs
     r         = range ps
-
-stepsInt :: Integral a => a -> Range -> [a]
-stepsInt nSteps range = bestSize (goodness alt0) alt0 alts
-  where
-    bestSize n a (a':as) = let n' = goodness a' in
-                           if n' < n then bestSize n' a' as else a
-
-    goodness vs          = abs (genericLength vs - nSteps)
-
-    (alt0:alts)          = map (\n -> steps n range) sampleSteps
-
-    sampleSteps          = [1,2,5] ++ sampleSteps1
-    sampleSteps1         = [10,20,25,50] ++ map (*10) sampleSteps1
-
-    steps size (min,max) = takeWhile (<b) [a,a+size..] ++ [b]
-      where
-        a = (floor   (min / fromIntegral size)) * size
-        b = (ceiling (max / fromIntegral size)) * size
 

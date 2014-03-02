@@ -3,6 +3,9 @@ module Graphics.Rendering.Chart.Utils(
     isValidNumber,
     maybeM,
     
+    maximum0,
+    log10,
+    
     -- * Look-Up Tables
     LUT,
     fromLUT,
@@ -24,6 +27,16 @@ isValidNumber v = not (isNaN v) && not (isInfinite v)
 maybeM :: (Monad m) => b -> (a -> m b) -> Maybe a -> m b
 maybeM v = maybe (return v)
 
+-- | Return the maximum value in an array if non-empty,
+--   otherwise 0.
+maximum0 :: (Num a, Ord a) => [a] -> a
+maximum0 [] = 0
+maximum0 vs = maximum vs
+
+-- | Return the log of the input, in base 10.
+log10 :: (Floating a) => a -> a
+log10 = logBase 10
+  
 -- | A simple (in other words /experimental/) representation of a look-up table.
 --   There must be something like this in one of the container-like libraries
 --   somewhere, but I am too lazy to look.

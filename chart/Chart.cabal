@@ -21,6 +21,8 @@ library
                , data-default-class < 0.1
                , operational >= 0.2.2 && < 0.3
 
+  Ghc-options: -Wall -fno-warn-orphans
+
   Exposed-modules:
         Graphics.Rendering.Chart,
         Graphics.Rendering.Chart.Drawing,
@@ -31,6 +33,7 @@ library
         Graphics.Rendering.Chart.Axis.Floating,
         Graphics.Rendering.Chart.Axis.Indexed,
         Graphics.Rendering.Chart.Axis.Int,
+        Graphics.Rendering.Chart.Axis.Internal,
         Graphics.Rendering.Chart.Axis.LocalTime,
         Graphics.Rendering.Chart.Axis.Types,
         Graphics.Rendering.Chart.Axis.Unit,

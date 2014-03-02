@@ -57,13 +57,9 @@ module Graphics.Rendering.Chart.Axis.Types(
 
 ) where
 
-import Data.Time
-import Data.Fixed
-import Data.Maybe
-import System.Locale (defaultTimeLocale)
 import Control.Monad
 import Data.List(sort,intersperse)
-import Control.Lens
+import Control.Lens hiding (at, re)
 import Data.Colour (opaque)
 import Data.Colour.Names (black, lightgrey)
 import Data.Default.Class
@@ -71,6 +67,7 @@ import Data.Default.Class
 import Graphics.Rendering.Chart.Geometry
 import Graphics.Rendering.Chart.Drawing
 import Graphics.Rendering.Chart.Renderable
+import Graphics.Rendering.Chart.Utils (maximum0)
 
 -- | A typeclass abstracting the functions we need
 -- to be able to plot against an axis of type a
@@ -183,7 +180,7 @@ axisLabelsOverride  :: [(x,String)] -> AxisData x -> AxisData x
 axisLabelsOverride o ad = ad{ _axis_labels = [o] }
 
 minsizeAxis :: AxisT x -> ChartBackend RectSize
-minsizeAxis (AxisT at as rev ad) = do
+minsizeAxis (AxisT at as _ ad) = do
     let labelVis = _axis_show_labels $ _axis_visibility $ ad
         tickVis  = _axis_show_ticks  $ _axis_visibility $ ad
         labels = if labelVis then labelTexts ad else []
@@ -192,7 +189,7 @@ minsizeAxis (AxisT at as rev ad) = do
                     mapM (mapM textDimension) labels
 
     let ag      = _axis_label_gap as
-    let tsize   = maximum ([0] ++ [ max 0 (-l) | (v,l) <- ticks ])
+    let tsize   = maximum ([0] ++ [ max 0 (-l) | (_,l) <- ticks ])
 
     let hw = maximum0 (map (maximum0.map fst) labelSizes)
     let hh = ag + tsize + (sum . intersperse ag . map (maximum0.map snd) $ labelSizes)
@@ -210,13 +207,10 @@ minsizeAxis (AxisT at as rev ad) = do
 labelTexts :: AxisData a -> [[String]]
 labelTexts ad = map (map snd) (_axis_labels ad)
 
-maximum0 [] = 0
-maximum0 vs = maximum vs
-
 -- | Calculate the amount by which the labels extend beyond
 --   the ends of the axis.
 axisOverhang :: (Ord x) => AxisT x -> ChartBackend (Double,Double)
-axisOverhang (AxisT at as rev ad) = do
+axisOverhang (AxisT at as _ ad) = do
     let labels = map snd . sort . concat . _axis_labels $ ad
     labelSizes <- withFontStyle (_axis_label_style as) $ do
       mapM textDimension labels
@@ -233,7 +227,7 @@ axisOverhang (AxisT at as rev ad) = do
                  E_Right  -> ohangh
 
 renderAxis :: AxisT x -> RectSize -> ChartBackend (PickFn x)
-renderAxis at@(AxisT et as rev ad) sz = do
+renderAxis at@(AxisT et as _ ad) sz = do
   let ls = _axis_line_style as
       vis = _axis_visibility ad
   when (_axis_show_line vis) $ do 
@@ -253,9 +247,9 @@ renderAxis at@(AxisT et as rev ad) sz = do
  where
    (sx,sy,ex,ey,tp,axisPoint,invAxisPoint) = axisMapping at sz
 
-   drawTick (value,length) =
+   drawTick (value,len) =
        let t1 = axisPoint value
-           t2 = t1 `pvadd` (vscale length tp)
+           t2 = t1 `pvadd` (vscale len tp)
        in alignStrokePoints [t1,t2] >>= strokePointPath
 
    (hta,vta,coord,awayFromAxis) = case et of
@@ -304,6 +298,7 @@ rectsOverlap (Rect p1 p2) r = any (withinRect r) ps
         p4 = Point x2 y1
         ps = [p1,p2,p3,p4]
 
+eachNth :: Int -> [a] -> [a]
 eachNth n = skipN
   where
     n' = n - 1
@@ -317,15 +312,15 @@ withinRect (Rect (Point x1 y1) (Point x2 y2)) (Point x y)
 
 axisMapping :: AxisT z -> RectSize
                -> (Double,Double,Double,Double,Vector,z->Point,Point->z)
-axisMapping (AxisT et as rev ad) (x2,y2) = case et of
+axisMapping (AxisT et _ rev ad) (x2,y2) = case et of
     E_Top    -> (x1,y2,x2,y2, (Vector 0 1),    mapx y2, imapx)
     E_Bottom -> (x1,y1,x2,y1, (Vector 0 (-1)), mapx y1, imapx)
     E_Left   -> (x2,y2,x2,y1, (Vector (1) 0),  mapy x2, imapy) 
     E_Right  -> (x1,y2,x1,y1, (Vector (-1) 0), mapy x1, imapy)
   where
     (x1,y1) = (0,0)
-    xr = reverse (x1,x2)
-    yr = reverse (y2,y1)
+    xr = reverseR (x1,x2)
+    yr = reverseR (y2,y1)
 
     mapx y x = Point (_axis_viewport ad xr x) y
     mapy x y = Point x (_axis_viewport ad yr y)
@@ -333,15 +328,15 @@ axisMapping (AxisT et as rev ad) (x2,y2) = case et of
     imapx (Point x _) = _axis_tropweiv ad xr x
     imapy (Point _ y) = _axis_tropweiv ad yr y
 
-    reverse r@(r0,r1)  = if rev then (r1,r0) else r
+    reverseR r@(r0,r1)  = if rev then (r1,r0) else r
 
 -- 
 renderAxisGrid :: RectSize -> AxisT z -> ChartBackend ()
-renderAxisGrid sz@(w,h) at@(AxisT re as rev ad) = do
+renderAxisGrid sz@(w,h) at@(AxisT re as _ ad) = do
     withLineStyle (_axis_grid_style as) $ do
       mapM_ (drawGridLine re) (_axis_grid ad)
   where
-    (sx,sy,ex,ey,tp,axisPoint,invAxisPoint) = axisMapping at sz
+    (_,_,_,_,_,axisPoint,_) = axisMapping at sz
 
     drawGridLine E_Top    = vline
     drawGridLine E_Bottom = vline
