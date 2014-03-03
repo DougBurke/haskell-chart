@@ -1,7 +1,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Graphics.Rendering.Chart.Plot.Bars
--- Copyright   :  (c) Tim Docker 2006
+-- Copyright   :  (c) Tim Docker 2006, 2014
 -- License     :  BSD-style (see chart/COPYRIGHT)
 --
 -- Bar Charts
@@ -31,14 +31,12 @@ module Graphics.Rendering.Chart.Plot.Bars(
 import Control.Lens
 import Control.Monad
 import Data.List(nub,sort)
-import Graphics.Rendering.Chart.Geometry
+import Graphics.Rendering.Chart.Geometry hiding (x0, y0)
 import Graphics.Rendering.Chart.Drawing
-import Graphics.Rendering.Chart.Renderable
 import Graphics.Rendering.Chart.Plot.Types
 import Graphics.Rendering.Chart.Axis
 import Data.Colour (opaque)
-import Data.Colour.Names (black, blue)
-import Data.Colour.SRGB (sRGB)
+import Data.Colour.Names (black)
 import Data.Default.Class
 
 class PlotValue a => BarsPlotValue a where
@@ -142,15 +140,15 @@ renderPlotBars p pmap = case (_plot_bars_style p) of
       BarsStacked   -> forM_ vals stackedBars
   where
     clusteredBars (x,ys) = do
-       forM_ (zip3 [0,1..] ys styles) $ \(i, y, (fstyle,_)) -> do
+       forM_ (zip3 [0,1..] ys styles) $ \(i, y, (fstyle,_)) -> 
            withFillStyle fstyle $ do
-             p <- alignFillPath (barPath (offset i) x yref0 y)
-             fillPath p
-       forM_ (zip3 [0,1..] ys styles) $ \(i, y, (_,mlstyle)) -> do
-           whenJust mlstyle $ \lstyle -> do
+             p' <- alignFillPath (barPath (offset i) x yref0 y)
+             fillPath p'
+       forM_ (zip3 [0,1..] ys styles) $ \(i, y, (_,mlstyle)) -> 
+           whenJust mlstyle $ \lstyle -> 
              withLineStyle lstyle $ do
-               p <- alignStrokePath (barPath (offset i) x yref0 y)
-               strokePath p
+               p' <- alignStrokePath (barPath (offset i) x yref0 y)
+               strokePath p'
 
     offset = case (_plot_bars_alignment p) of
       BarsLeft     -> \i -> fromIntegral i * width
@@ -164,15 +162,15 @@ renderPlotBars p pmap = case (_plot_bars_style p) of
          BarsRight    -> (-width)   ;
          BarsCentered -> (-width/2)
          }
-       forM_ (zip y2s styles) $ \((y0,y1), (fstyle,_)) -> do
+       forM_ (zip y2s styles) $ \((y0,y1), (fstyle,_)) -> 
            withFillStyle fstyle $ do
-             p <- alignFillPath (barPath ofs x y0 y1)
-             fillPath p
-       forM_ (zip y2s styles) $ \((y0,y1), (_,mlstyle)) -> do
-           whenJust mlstyle $ \lstyle -> do
+             p' <- alignFillPath (barPath ofs x y0 y1)
+             fillPath p'
+       forM_ (zip y2s styles) $ \((y0,y1), (_,mlstyle)) -> 
+           whenJust mlstyle $ \lstyle -> 
               withLineStyle lstyle $ do
-                p <- alignStrokePath (barPath ofs x y0 y1)
-                strokePath p
+                p' <- alignStrokePath (barPath ofs x y0 y1)
+                strokePath p'
 
     barPath xos x y0 y1 = do
       let (Point x' y') = pmap' (x,y1)
@@ -186,7 +184,7 @@ renderPlotBars p pmap = case (_plot_bars_style p) of
             case (_plot_bars_style p) of
                 BarsClustered -> w / fromIntegral nys
                 BarsStacked -> w
-        BarsFixWidth width -> width
+        BarsFixWidth width' -> width'
     styles = _plot_bars_item_styles p
 
     minXInterval = let diffs = zipWith (-) (tail mxs) mxs
@@ -197,7 +195,7 @@ renderPlotBars p pmap = case (_plot_bars_style p) of
         xs  = fst (allBarPoints p)
         mxs = nub $ sort $ map mapX xs
 
-    nys    = maximum [ length ys | (x,ys) <- vals ]
+    nys    = maximum [ length ys | (_,ys) <- vals ]
 
     pmap'  = mapXY pmap
     mapX x = p_x (pmap' (x,barsReference))
@@ -215,12 +213,11 @@ allBarPoints p = case (_plot_bars_style p) of
     y0  = _plot_bars_reference p
 
 stack :: (BarsPlotValue y) => [y] -> [y]
-stack ys = scanl1 barsAdd ys
-
+stack = scanl1 barsAdd
 
 renderPlotLegendBars :: (FillStyle,Maybe LineStyle) -> Rect -> ChartBackend ()
-renderPlotLegendBars (fstyle,mlstyle) r@(Rect p1 p2) = do
-  withFillStyle fstyle $ do
+renderPlotLegendBars (fstyle,_) r = 
+  withFillStyle fstyle $
     fillPath (rectPath r)
 
 $( makeLenses ''PlotBars )
