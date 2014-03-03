@@ -12,6 +12,10 @@ Category: Graphics
 Cabal-Version: >= 1.6
 Build-Type: Simple
 
+-- This causes Cabal 1.16 to warn about an unsupported version; at present
+-- it is not woth bumping up Cabal-Version (need to add a default-language
+-- field to the library section at least).
+--
 extra-doc-files: docimages/*.svg
 
 library
