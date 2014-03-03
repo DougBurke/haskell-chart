@@ -38,7 +38,6 @@ module Graphics.Rendering.Chart.Renderable(
 
 import Control.Monad
 import Control.Lens
-import Data.List ( nub, transpose, sort )
 import Data.Monoid
 import Data.Default.Class
 
@@ -50,7 +49,7 @@ import Graphics.Rendering.Chart.Utils
 --
 --   Perhaps it might be generalised from Maybe a to
 --   (MonadPlus m ) => m a in the future.
-type PickFn a = Point -> (Maybe a)
+type PickFn a = Point -> Maybe a
 
 nullPickFn :: PickFn a
 nullPickFn = const Nothing
@@ -91,7 +90,7 @@ spacer1 r  = r{ render  = \_ -> return nullPickFn }
 
 -- | Replace the pick function of a renderable with another.
 setPickFn :: PickFn b -> Renderable a -> Renderable b
-setPickFn pickfn r = r{ render  = \sz -> do { render r sz; return pickfn; } }
+setPickFn pickfn r = r{ render  = \sz -> render r sz >> return pickfn }
 
 -- | Map a function over the result of a renderable's pickfunction, keeping only 'Just' results.
 mapMaybePickFn :: (a -> Maybe b) -> Renderable a -> Renderable b
@@ -112,14 +111,14 @@ addMargins (t,b,l,r) rd = Renderable { minsize = mf, render = rf }
         (w,h) <- minsize rd
         return (w+l+r,h+t+b)
 
-    rf (w,h) = do
+    rf (w,h) = 
         withTranslation (Point l t) $ do
           pickf <- render rd (w-l-r,h-t-b)
           return (mkpickf pickf (t,b,l,r) (w,h))
 
-    mkpickf pickf (t,b,l,r) (w,h) (Point x y)
-        | x >= l && x <= w-r && y >= t && t <= h-b = pickf (Point (x-l) (y-t))
-        | otherwise                                = Nothing
+    mkpickf pickf (t',b',l',r') (w,h) (Point x y)
+        | x >= l' && x <= w-r' && y >= t' && t' <= h-b' = pickf (Point (x-l') (y-t'))
+        | otherwise                                     = Nothing
 
 -- | Overlay a renderable over a solid background fill.
 fillBackground :: FillStyle -> Renderable a -> Renderable a
@@ -160,17 +159,19 @@ rlabel fs hta vta rot s = Renderable { minsize = mf, render = rf }
       ts <- textSize s
       let sz@(w,h) = (textSizeWidth ts, textSizeHeight ts)
       let descent = textSizeDescent ts
-      withTranslation (Point 0 (-descent)) $ do
-        withTranslation (Point (xadj sz hta 0 w0) (yadj sz vta 0 h0)) $ do
+      withTranslation (Point 0 (-descent)) $ 
+        withTranslation (Point (xadj sz hta 0 w0) (yadj sz vta 0 h0)) $ 
           withRotation rot' $ do
             drawText (Point (-w/2) (h/2)) s
             return (\_-> Just s)  -- PickFn String
-    xadj (w,h) HTA_Left   x1 x2 =  x1 +(w*acr+h*asr)/2
-    xadj (w,h) HTA_Centre x1 x2 = (x1 + x2)/2
-    xadj (w,h) HTA_Right  x1 x2 =  x2 -(w*acr+h*asr)/2
-    yadj (w,h) VTA_Top    y1 y2 =  y1 +(w*asr+h*acr)/2
-    yadj (w,h) VTA_Centre y1 y2 = (y1+y2)/2
-    yadj (w,h) VTA_Bottom y1 y2 =  y2 - (w*asr+h*acr)/2
+    xadj (w,h) HTA_Left   x1 _  =  x1 +(w*acr+h*asr)/2
+    xadj _     HTA_Centre x1 x2 = (x1 + x2)/2
+    xadj (w,h) HTA_Right  _  x2 =  x2 -(w*acr+h*asr)/2
+    
+    yadj (w,h) VTA_Top      y1 _  =  y1 +(w*asr+h*acr)/2
+    yadj _     VTA_Centre   y1 y2 = (y1+y2)/2
+    yadj (w,h) VTA_Bottom   _  y2 =  y2 - (w*asr+h*acr)/2
+    yadj _     VTA_BaseLine _  _  =  0 -- TODO: is this correct?
 
     rot'      = rot / 180 * pi
     (cr,sr)   = (cos rot', sin rot')
@@ -189,10 +190,6 @@ data Rectangle = Rectangle {
   _rect_lineStyle   :: Maybe LineStyle,
   _rect_cornerStyle :: RectCornerStyle
 }
-
-{-# DEPRECATED defaultRectangle "Use the according Data.Default instance!" #-}
-defaultRectangle :: Rectangle
-defaultRectangle = def
 
 instance Default Rectangle where
   def = Rectangle
@@ -214,12 +211,12 @@ rectangleToRenderable rectangle = Renderable mf rf
       maybeM () (stroke sz) (_rect_lineStyle rectangle)
       return nullPickFn
 
-    fill sz fs = do
-        withFillStyle fs $ do
+    fill sz fs = 
+        withFillStyle fs $ 
           fillPath $ strokeRectangleP sz (_rect_cornerStyle rectangle)
 
-    stroke sz ls = do
-        withLineStyle ls $ do
+    stroke sz ls = 
+        withLineStyle ls $ 
           strokePath $ strokeRectangleP sz (_rect_cornerStyle rectangle)
 
     strokeRectangleP (x2,y2) RCornerSquare =
