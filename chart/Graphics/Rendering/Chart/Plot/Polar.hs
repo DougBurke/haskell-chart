@@ -37,7 +37,8 @@ module Graphics.Rendering.Chart.Plot.Polar(
   
   PolarLayout(..)
   , PolarChart(..)
-  , PolarItem(..)
+  , PolarPoints(..)
+  , PolarCoord
     
   -- * Rendering  
     
@@ -53,12 +54,11 @@ module Graphics.Rendering.Chart.Plot.Polar(
   , polarlayout_plot
   , polarlayout_margin
     
-  , polar_data
-  , polar_colors
+  , polar_points
     
-  , polar_r
-  , polar_theta
-  , polar_size
+  , polar_points_legend
+  , polar_points_style
+  , polar_points_values
   )
        where
 
@@ -82,6 +82,10 @@ import Graphics.Rendering.Chart.Utils (maximum0)
 
 -- | A polar plot of @(r,theta)@ values.
 --    
+--   /TODO:/
+--
+--    - Calculate the spacing for the theta labels rather than hard coding them
+-- 
 data PolarLayout = PolarLayout 
   { _polarlayout_background      :: FillStyle
     -- ^ How to fill the rectangle.
@@ -104,39 +108,51 @@ data PolarLayout = PolarLayout
     -- ^ The margin distance to use.
   }
 
--- | At present the only data that can be plotted are filled circles.
---
---   The @_polar_colors@ field refers to the fill used, with the
---   outline drawn in black.
+-- | The data and axes to plot (at present only the data is configureable).
 --
 --   At present a set of labels indicating the radial values
 --   are drawn at an angle of 45 degrees, to match the style
 --   used by matplotlib - e.g. <http://matplotlib.org/gallery.html#pie_and_polar_charts> -
 --   but it could be made configurable.
 --
+--   /TODO:/
+--
+--    - Add axis configuration
+--
 data PolarChart = PolarChart
-                  { _polar_data     :: [PolarItem]
-                  , _polar_colors   :: [AlphaColour Double]
+                  { _polar_points :: [PolarPoints]
                   }
 
--- | A circle at a given @(r,theta)@ location.
-data PolarItem = PolarItem
-                 { _polar_r      :: Double
-                   -- ^ radius assumed to be 0 or greater.
-                 , _polar_theta  :: Double
-                   -- ^ angle in radians, measured anti-/counter- clockwise.
-                 , _polar_size   :: Double
-                   -- ^ radius of circle, in the same units as @_polar_r@.
-                 }
-                 
+-- | Radius and angle (in radians, measured anti-/counter- clockwise from the
+--   X axis). Points with a negative radius are excluded from the plot.
+type PolarCoord = (Double, Double)
+
+-- | The points to draw.
+--
+--   /TODO:/
+--
+--    - Change to something like @PolarPoints r t@
+--
+data PolarPoints = PolarPoints
+                   { _polar_points_legend :: String
+                     -- ^ The label for the points (currently unused)
+                   , _polar_points_style :: PointStyle
+                     -- ^ The style used to draw the points
+                   , _polar_points_values :: [PolarCoord]
+                     -- ^ The @(r,theta)@ values.
+                   }
+
 instance Default PolarChart where
   def = PolarChart 
-    { _polar_data   = []
-    , _polar_colors = defaultColorSeq 
+    { _polar_points = []
     }
   
-instance Default PolarItem where
-  def = PolarItem 0 0 0
+instance Default PolarPoints where
+  def = PolarPoints
+    { _polar_points_legend = ""
+    , _polar_points_style  = def
+    , _polar_points_values = []
+    }
 
 instance Default PolarLayout where
   def = PolarLayout 
@@ -220,6 +236,28 @@ minsizePolar pc = do
 d2r :: Double -> Double
 d2r = ((pi/180.0) *) 
 
+getMaxRadii :: 
+  [PolarPoints] 
+  -> [Double]
+  -- ^ The maximum radii of all the points; this is the radius of the
+  --   point plus the radius of the symbol.
+getMaxRadii = concatMap getRs
+  where
+    getRs :: PolarPoints -> [Double]
+    getRs pp = map getR $ _polar_points_values pp
+      where
+        rad = _point_radius $ _polar_points_style pp -- use Lens!
+        getR = (rad +) . snd 
+
+-- Remove invalid points (at present that means negative radii).
+--
+-- TODO: clean up to remove empty PolarPoints sections
+-- 
+filterPoints :: [PolarPoints] -> [PolarPoints]
+filterPoints = map noNeg
+  where
+    noNeg pp = pp { _polar_points_values = filter ((>=0) . fst) (_polar_points_values pp) }
+
 renderPolar :: 
   Maybe FillStyle
   -> PolarChart 
@@ -237,9 +275,8 @@ renderPolar mf pc (w,h) = do
       
       radius = min (w - 2*extraw) (h - 2*extrah) / 2
       
-      toR po = _polar_r po + _polar_size po
-      userData = _polar_data pc
-      rMaxVals = map toR userData
+      allPoints = filterPoints $ _polar_points pc
+      rMaxVals = getMaxRadii allPoints
       
       -- scale data using the max of (r+size);
       -- actually, this is now scaled by rMax after
@@ -258,31 +295,22 @@ renderPolar mf pc (w,h) = do
       g (xs, ys, zs) = (f0 xs, f0 ys, f0 zs)
       (tickvs, labelvs, gridvs) = g $ scaleLinear (5, 5) (0, rMaxTmp) rMaxVals
   
-      -- convert user coords to chart coords
+      -- scale the user coodinate to the screen coordinates
       scaleR r = r * radius /rMax
-      coordConv r theta = 
+      coordConv :: PolarCoord -> (Double,Double)
+      coordConv (r,theta) = 
         let rr = scaleR r
         in ( center_x + rr * cos theta
            , center_y - rr * sin theta ) 
-  
-      paint :: (PolarItem, AlphaColour Double) -> ChartBackend ()
-      paint (pitem,colour) = do
-        let r = _polar_r pitem
-            rad = _polar_size pitem
-            theta = _polar_theta pitem
-            
-            (x, y) = coordConv r theta
       
-            -- how to draw the circle;
-            -- what should the radius units be?
-            ps = def
-                 { _point_color = colour
-                 , _point_border_color = opaque black
-                 , _point_border_width = 1
-                 , _point_radius = scaleR rad
-                 }
-        
-        drawPoint ps (Point x y)
+      paints :: PolarPoints -> ChartBackend ()
+      paints ps = mapM_ (paint (_polar_points_style ps)) $ _polar_points_values ps
+      
+      paint :: PointStyle -> PolarCoord -> ChartBackend ()
+      paint pstyle rt = 
+        let (x,y) = coordConv rt
+            ps = pstyle { _point_radius = scaleR (_point_radius pstyle) }
+        in drawPoint ps (Point x y)
         
   case mf of
     Nothing -> return ()
@@ -296,20 +324,20 @@ renderPolar mf pc (w,h) = do
   renderRadialAxis coordConv (0,rMax) labelvs radialAngle
   
   -- data
-  mapM_ paint $ zip userData (_polar_colors pc)
-  
+  forM_ allPoints paints
+    
   return nullPickFn
       
 -- don't do r<=min and r>=max
 renderRadialGrid ::
-  (Double -> Double -> (Double,Double))
+  (PolarCoord -> (Double,Double))
   -- ^ convert from r,theta to plot coordinates
   -> (Double, Double)
   -- ^ (min,max) values for the radial axis
   -> [Double]          -- ^ grid positions
   -> ChartBackend ()
 renderRadialGrid conv (rmin,rmax) gridvs = do
-  let (cx, cy) = conv 0 0
+  let (cx, cy) = conv (0,0)
       p0 = Point cx cy
       step = 45
       angles = map d2r [0, step .. (360-step)]
@@ -320,17 +348,17 @@ renderRadialGrid conv (rmin,rmax) gridvs = do
   withLineStyle (dashedLine 1 [2,4] (opaque lightgrey)) $ do
     -- constant r
     forM_ fgridvs $ \r -> 
-      let (cx2, _) = conv r 0
+      let (cx2, _) = conv (r,0)
       in strokePath $ arc' cx cy (cx2-cx) 0 (2*pi)
     
     -- constant theta
     forM_ angles $ \theta ->
-      let (cx2, cy2) = conv rmax theta
+      let (cx2, cy2) = conv (rmax,theta)
       in alignStrokePoints [p0, Point cx2 cy2] >>= strokePointPath
          
 -- Does both r and theta
 renderRadialAxis ::
-  (Double -> Double -> (Double,Double))
+  (PolarCoord -> (Double,Double))
   -- ^ convert from r,theta to plot coordinates
   -> (Double, Double)
   -- ^ (min,max) values for the radial axis
@@ -352,8 +380,8 @@ renderRadialAxis conv (_,rmax) labelvs rAngle = do
       -- end   = axisPoint rmax
   
       -- here assuming r=0 is the center
-      (cx,cy) = conv 0 0
-      (cx2,_) = conv rmax 0
+      (cx,cy) = conv (0,0)
+      (cx2,_) = conv (rmax,0)
       cr = cx2 - cx
       
       -- this only works when theta=0
@@ -426,7 +454,7 @@ renderRadialAxis conv (_,rmax) labelvs rAngle = do
     -}
     
     forM_ labelvs $ \r -> do
-      let (lx,ly) = conv r rAngle
+      let (lx,ly) = conv (r,rAngle)
           txt = show r
       -- choice of offset depends on rAngle; current choice is okay for 22.5 degrees
       drawTextA HTA_Left VTA_Bottom (Point lx ly) txt
@@ -435,7 +463,7 @@ renderRadialAxis conv (_,rmax) labelvs rAngle = do
     let tlabels = [0, 45 .. 315::Int]
     forM_ tlabels $ \t -> do
       -- QUS: how best to do the offset?
-      let (lx,ly) = conv (rmax*1.05) $ d2r (fromIntegral t)
+      let (lx,ly) = conv (rmax*1.05, d2r (fromIntegral t))
           txt = show t ++ [chr 176] -- add in the degree symbol
       drawTextA HTA_Centre VTA_Centre (Point lx ly) txt
 
@@ -444,12 +472,19 @@ renderRadialAxis conv (_,rmax) labelvs rAngle = do
 
 $( makeLenses ''PolarLayout )
 $( makeLenses ''PolarChart )
-$( makeLenses ''PolarItem )
+$( makeLenses ''PolarPoints )
 
 -- Documentation
 --
--- Why 
 -- $example
+--
+-- /WARNING/
+--
+-- The image shown here is currently out of date:
+--
+--   - a bug in the code means that the axis auto-scaling is not working, so
+--     that the maxium radius is 7, and the radial grid lines do not match up
+--     with the axis labels.
 --
 -- This is based on the scatter-plot version from matplotlib,
 -- <http://matplotlib.org/examples/pie_and_polar_charts/polar_scatter_demo.html>.
@@ -468,42 +503,45 @@ $( makeLenses ''PolarItem )
 -- > import Data.Colour
 -- > import Data.Colour.Names
 -- > import Data.Default.Class
+-- > import Data.List (zip4)
 -- > import Graphics.Rendering.Chart
 -- > import Graphics.Rendering.Chart.Utils (LUT, fromLUT, cubeHelix0)
 -- > import System.Random
 -- >
--- > type PolarData = ([(Double, Double, Double)], [AlphaColour Double])
--- > 
 -- > -- randomly chose r and theta values; the circle radius scales with
 -- > -- r, and the color maps to theta via the LUT.
--- > makeData :: LUT (Colour Double) -> IO PolarData
+-- > makeData :: LUT (Colour Double) -> IO [PolarPoints]
 -- > makeData lut = do
--- >   let rand = replicateM 250 (randomIO :: IO Double)
+-- >   let rand = replicateM 150 (randomIO :: IO Double)
 -- >   r1 <- rand
 -- >   r2 <- rand
 -- >   let rs = map (2*) r1
 -- >       rads = map (*0.1) rs
 -- >       cols = map (flip withOpacity 0.4 . fromLUT lut) r2
 -- >       thetas = fmap (2*pi*) r2
--- >   return (zip3 rs thetas rads, cols)
--- > 
--- > bgFill = solidFillStyle (opaque gray)
--- > pFill = Just $ solidFillStyle (withOpacity orange 0.4)
--- >       
--- > testPlot :: PolarData -> PolarLayout
--- > testPlot (vals,cols) = 
--- >   let pitem (r,t,s) = polar_r .~ r 
--- >                       $ polar_theta .~ t
--- >                       $ polar_size .~ s
+-- >       pitem (r,t,s,c) = polar_points_style .~ pstyle s c
+-- >                       $ polar_points_values .~ [(r,t)]
 -- >                       $ def
+-- >       pstyle s c = point_color .~ c
+-- >                    $ point_radius .~ s
+-- >                    $ point_border_color .~ opaque black
+-- >                    $ point_border_width .~ 1
+-- >                    $ def
+-- >                    
+-- >   return $ map pitem $ zip4 rs thetas rads cols
+-- > 
+-- > bgFill, pFill :: FillStyle
+-- > bgFill = solidFillStyle (opaque gray)
+-- > pFill = solidFillStyle (withOpacity orange 0.4)
 -- >       
--- >   in polarlayout_title .~ "Polar plot"
--- >      $ polarlayout_background .~ bgFill
--- >      $ polarlayout_plot_background .~ pFill
--- >      $ polarlayout_plot . polar_data .~ map pitem vals
--- >      $ polarlayout_plot . polar_colors .~ cols
--- >      $ polarlayout_margin .~ 10
--- >      $ def
+-- > testPlot :: [PolarPoints] -> PolarLayout
+-- > testPlot pps = 
+-- >   polarlayout_title .~ "Polar plot"
+-- >     $ polarlayout_background .~ bgFill
+-- >     $ polarlayout_plot_background .~ Just pFill
+-- >     $ polarlayout_plot . polar_points .~ pps
+-- >     $ polarlayout_margin .~ 10
+-- >     $ def
 -- > 
 -- > makePlot :: IO ()
 -- > makePlot = do
@@ -517,7 +555,7 @@ $( makeLenses ''PolarItem )
 -- This is /not/ intended as a usable API, more as an exploration of the
 -- design space. Issues include:
 --
---   - support for other shapes (for symbols), lines, histogram-style plots, ...
+--   - support for lines, histogram-style plots, ...
 --
 --   - allow theta values to be given in radians or degrees
 --
