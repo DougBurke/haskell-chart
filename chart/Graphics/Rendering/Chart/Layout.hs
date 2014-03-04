@@ -37,6 +37,7 @@ module Graphics.Rendering.Chart.Layout
   , LayoutPick(..)
   , StackedLayouts(..)
   , StackedLayout(..)
+  -- , LegendItem  haddock complains about this being missing, but from what?
   , MAxisFn
   
   , layoutToRenderable
