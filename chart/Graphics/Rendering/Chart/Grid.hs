@@ -8,7 +8,7 @@
 -- and vertical layout.
 
 module Graphics.Rendering.Chart.Grid (
-    Grid, Span,
+    Grid, Span, SpaceWeight,
     tval, tspan,
     empty, nullt,
     (.|.), (./.),
