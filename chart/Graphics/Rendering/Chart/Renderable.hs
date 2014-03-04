@@ -1,7 +1,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Graphics.Rendering.Chart.Renderable
--- Copyright   :  (c) Tim Docker 2006
+-- Copyright   :  (c) Tim Docker 2006, 2014
 -- License     :  BSD-style (see chart/COPYRIGHT)
 --
 -- This module contains the definition of the 'Renderable' type, which
@@ -14,6 +14,9 @@ module Graphics.Rendering.Chart.Renderable(
     Renderable(..),
     ToRenderable(..),
     PickFn,
+    
+    Rectangle(..),
+    RectCornerStyle(..),
     
     rectangleToRenderable,
 
