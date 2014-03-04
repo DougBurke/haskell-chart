@@ -1,7 +1,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Graphics.Rendering.Chart.Axis.Int
--- Copyright   :  (c) Tim Docker 2010
+-- Copyright   :  (c) Tim Docker 2010, 2014
 -- License     :  BSD-style (see chart/COPYRIGHT)
 --
 -- Calculate and render integer indexed axes
@@ -28,6 +28,8 @@ instance PlotValue Integer where
     fromValue  = round
     autoAxis   = autoScaledIntAxis defaultIntAxis
 
+-- | The default instance for `LinearAxisParams` is set up for
+--   floating-point axes.
 defaultIntAxis :: (Show a) => LinearAxisParams a
 defaultIntAxis  = LinearAxisParams {
     _la_labelf  = show,
@@ -48,7 +50,7 @@ scaledIntAxis lap (min,max) ps =
   where
     range []  = (0,1)
     range _   | min == max = (fromIntegral $ min-1, fromIntegral $ min+1)
-              | otherwise  = (fromIntegral $ min,   fromIntegral $ max)
+              | otherwise  = (fromIntegral   min,   fromIntegral   max)
 --  labelvs  :: [i]
     labelvs   = stepsInt (fromIntegral $ _la_nLabels lap) r
     tickvs    = stepsInt (fromIntegral $ _la_nTicks lap)
