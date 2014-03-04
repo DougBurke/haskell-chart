@@ -478,14 +478,6 @@ $( makeLenses ''PolarPoints )
 --
 -- $example
 --
--- /WARNING/
---
--- The image shown here is currently out of date:
---
---   - a bug in the code means that the axis auto-scaling is not working, so
---     that the maxium radius is 7, and the radial grid lines do not match up
---     with the axis labels.
---
 -- This is based on the scatter-plot version from matplotlib,
 -- <http://matplotlib.org/examples/pie_and_polar_charts/polar_scatter_demo.html>.
 --
@@ -503,7 +495,7 @@ $( makeLenses ''PolarPoints )
 -- > import Data.Colour
 -- > import Data.Colour.Names
 -- > import Data.Default.Class
--- > import Data.List (zip4)
+-- > import Data.List (zip5)
 -- > import Graphics.Rendering.Chart
 -- > import Graphics.Rendering.Chart.Utils (LUT, fromLUT, cubeHelix0)
 -- > import System.Random
@@ -512,23 +504,32 @@ $( makeLenses ''PolarPoints )
 -- > -- r, and the color maps to theta via the LUT.
 -- > makeData :: LUT (Colour Double) -> IO [PolarPoints]
 -- > makeData lut = do
--- >   let rand = replicateM 150 (randomIO :: IO Double)
+-- >   let npts = 150
+-- >       rand = replicateM npts (randomIO :: IO Double)
+-- >       shapes = [ PointShapeCircle
+-- >                , PointShapePolygon 6 True
+-- >                , PointShapePlus
+-- >                , PointShapeCross
+-- >                , PointShapeStar
+-- >                ]
 -- >   r1 <- rand
 -- >   r2 <- rand
+-- >   shps <- replicateM npts (randomRIO (0,length shapes -1))
 -- >   let rs = map (2*) r1
 -- >       rads = map (*0.1) rs
 -- >       cols = map (flip withOpacity 0.4 . fromLUT lut) r2
 -- >       thetas = fmap (2*pi*) r2
--- >       pitem (r,t,s,c) = polar_points_style .~ pstyle s c
--- >                       $ polar_points_values .~ [(r,t)]
--- >                       $ def
--- >       pstyle s c = point_color .~ c
--- >                    $ point_radius .~ s
--- >                    $ point_border_color .~ opaque black
--- >                    $ point_border_width .~ 1
--- >                    $ def
+-- >       pitem (r,t,s,c,shp) = polar_points_style .~ pstyle s c shp
+-- >                           $ polar_points_values .~ [(r,t)]
+-- >                           $ def
+-- >       pstyle s c shp = point_shape .! shapes !! shp
+-- >                      $ point_color .~ c
+-- >                      $ point_radius .~ s
+-- >                      $ point_border_color .~ opaque black
+-- >                      $ point_border_width .~ 1
+-- >                      $ def
 -- >                    
--- >   return $ map pitem $ zip4 rs thetas rads cols
+-- >   return $ map pitem $ zip5 rs thetas rads cols
 -- > 
 -- > bgFill, pFill :: FillStyle
 -- > bgFill = solidFillStyle (opaque gray)
@@ -547,7 +548,7 @@ $( makeLenses ''PolarPoints )
 -- > makePlot = do
 -- >   data <- makeData cubeHelix0
 -- >   let r = toRenderable (testPlot data)
--- >   _ <- C.renderableToFile (C.FileOptions (600,600) C.SVG) r "polar.svg"
+-- >   _ <- C.renderableToFile (C.FileOptions (400,400) C.SVG) r "polar.svg"
 --
 
 -- $notes
