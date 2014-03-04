@@ -246,8 +246,8 @@ getMaxRadii = concatMap getRs
     getRs :: PolarPoints -> [Double]
     getRs pp = map getR $ _polar_points_values pp
       where
-        rad = _point_radius $ _polar_points_style pp -- use Lens!
-        getR = (rad +) . snd 
+        rad = _point_radius $ _polar_points_style pp
+        getR = (rad +) . fst
 
 -- Remove invalid points (at present that means negative radii).
 --
