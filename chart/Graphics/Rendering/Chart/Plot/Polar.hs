@@ -41,6 +41,7 @@ module Graphics.Rendering.Chart.Plot.Polar(
   
   PolarLayout(..)
   , PolarChart(..)
+  , PolarAxes(..)
   , PolarPoints(..)
   , PolarCoord
     
@@ -59,6 +60,8 @@ module Graphics.Rendering.Chart.Plot.Polar(
   , polarlayout_margin
     
   , polar_points
+  , polar_axes
+    
   , polar_radial_axis_offset
   , polar_theta_axis_degrees
   , polar_theta_axis_zero
@@ -119,34 +122,40 @@ data PolarLayout = PolarLayout
   }
 
 -- | The data and axes to plot (at present only the data is configureable).
+data PolarChart = PolarChart
+                  { _polar_points :: [PolarPoints]
+                  , _polar_axes :: PolarAxes
+                  }
+                  
+-- | Configuration of the axes of the polar plot.
 --
 --   /TODO:/
 --
---    - Add axis configuration/move into relevant data structures
+--    - allow the labelling to be set: go from axis value to
+--      the label, alignment, ...
 --
-data PolarChart = PolarChart
-                  { _polar_points :: [PolarPoints]
-                  , _polar_radial_axis_offset :: Double
-                    -- ^ The offset, in radians, from the location of the
-                    --   @&#x03b8;=0@ axis at which to label the radial axis.
-                    --   The default is @&#x03c0;/8@.
-                  , _polar_theta_axis_degrees :: Bool
-                    -- ^ Label the &#x03b8; axis in degrees (@True@) or radians (@False@),
-                    --   in the latter case using \"units\" of @&#x03c0;@ (e.g. @&#x03c0;/2@).
-                    --   The default is @True@.
-                  , _polar_theta_axis_zero :: Double
-                    -- ^ Angle, in radians, measured counter-/anti- clockwise from the horizontal,
-                    --   to use for @&#x03b8;=0@. The default is @0@.
-                  , _polar_theta_axis_nticks :: Int
-                    -- ^ The number of tick marks on the theta axis; the default is 8 which gives
-                    --   a spacing of 45 degrees. The value is assumed to be greater than 1.
-                  , _polar_theta_axis_margin :: Double
-                    -- ^ The distance between the maximum radius and the theta labels,
-                    --   in display coordinates
-                  , _polar_theta_axis_reverse :: Bool
-                    -- ^ Set to @True@ to have the angles be measured clockwise; the
-                    --   default is @False@.
-                  }
+data PolarAxes = PolarAxes 
+                 { _polar_radial_axis_offset :: Double
+                   -- ^ The offset, in radians, from the location of the
+                   --   @&#x03b8;=0@ axis at which to label the radial axis.
+                   --   The default is @&#x03c0;/8@.
+                 , _polar_theta_axis_degrees :: Bool
+                   -- ^ Label the &#x03b8; axis in degrees (@True@) or radians (@False@),
+                   --   in the latter case using \"units\" of @&#x03c0;@ (e.g. @&#x03c0;/2@).
+                   --   The default is @True@.
+                 , _polar_theta_axis_zero :: Double
+                   -- ^ Angle, in radians, measured counter-/anti- clockwise from the horizontal,
+                   --   to use for @&#x03b8;=0@. The default is @0@.
+                 , _polar_theta_axis_nticks :: Int
+                   -- ^ The number of tick marks on the theta axis; the default is 8 which gives
+                   --   a spacing of 45 degrees. The value is assumed to be greater than 1.
+                 , _polar_theta_axis_margin :: Double
+                   -- ^ The distance between the maximum radius and the theta labels,
+                   --   in display coordinates
+                 , _polar_theta_axis_reverse :: Bool
+                   -- ^ Set to @True@ to have the angles be measured clockwise; the
+                   --   default is @False@.
+                 }
 
 -- | Radius and &#x03b8; (in radians, measured anti-/counter- clockwise from the
 --   X axis). Points with a negative radius are excluded from the plot.
@@ -170,7 +179,12 @@ data PolarPoints = PolarPoints
 instance Default PolarChart where
   def = PolarChart 
     { _polar_points = []
-    , _polar_radial_axis_offset = d2r (45.0/2)
+    , _polar_axes = def
+    }
+    
+instance Default PolarAxes where
+  def = PolarAxes
+    { _polar_radial_axis_offset = d2r (45.0/2)
     , _polar_theta_axis_degrees = True
     , _polar_theta_axis_zero = 0
     , _polar_theta_axis_nticks = 8
@@ -300,8 +314,9 @@ renderPolar mf pc (w,h) = do
       center_x = w/2
       center_y = h/2
       
-      radialAngle = _polar_radial_axis_offset pc
-      nThetaTicks = _polar_theta_axis_nticks pc
+      pa = _polar_axes pc
+      radialAngle = _polar_radial_axis_offset pa
+      nThetaTicks = _polar_theta_axis_nticks pa
       
       radius = min (w - 2*extraw) (h - 2*extrah) / 2
       
@@ -326,8 +341,8 @@ renderPolar mf pc (w,h) = do
       (tickvs, labelvs, gridvs) = g $ scaleLinear (5, 5) (0, rMaxTmp) rMaxVals
 
       -- scale from the user theta value (in radians) to the on-screen value
-      getTheta theta = _polar_theta_axis_zero pc +
-                       if _polar_theta_axis_reverse pc then (-theta) else theta
+      getTheta theta = _polar_theta_axis_zero pa +
+                       if _polar_theta_axis_reverse pa then (-theta) else theta
   
       -- scale the user coodinate to the screen coordinates
       scaleR r = r * radius /rMax
@@ -355,8 +370,8 @@ renderPolar mf pc (w,h) = do
   
   -- axes; repeated code needs to be refactored
   renderRadialGrid coordConv (0,rMax) nThetaTicks gridvs
-  renderRadialAxis coordConv (0,rMax) (_polar_theta_axis_margin pc)
-    nThetaTicks labelvs radialAngle (_polar_theta_axis_degrees pc)
+  renderRadialAxis coordConv (0,rMax) (_polar_theta_axis_margin pa)
+    nThetaTicks labelvs radialAngle (_polar_theta_axis_degrees pa)
   
   -- data
   forM_ allPoints paints
@@ -549,6 +564,7 @@ renderRadialAxis conv (_,rmax) rmargin nticks labelvs rAngle useDeg = do
 $( makeLenses ''PolarLayout )
 $( makeLenses ''PolarChart )
 $( makeLenses ''PolarPoints )
+$( makeLenses ''PolarAxes )
 
 -- Documentation
 --
