@@ -63,6 +63,7 @@ module Graphics.Rendering.Chart.Plot.Polar(
   , polar_theta_axis_degrees
   , polar_theta_axis_zero
   , polar_theta_axis_nticks
+  , polar_theta_axis_margin
   , polar_theta_axis_reverse
     
   , polar_points_legend
@@ -139,6 +140,9 @@ data PolarChart = PolarChart
                   , _polar_theta_axis_nticks :: Int
                     -- ^ The number of tick marks on the theta axis; the default is 8 which gives
                     --   a spacing of 45 degrees. The value is assumed to be greater than 1.
+                  , _polar_theta_axis_margin :: Double
+                    -- ^ The distance between the maximum radius and the theta labels,
+                    --   in display coordinates
                   , _polar_theta_axis_reverse :: Bool
                     -- ^ Set to @True@ to have the angles be measured clockwise; the
                     --   default is @False@.
@@ -170,6 +174,7 @@ instance Default PolarChart where
     , _polar_theta_axis_degrees = True
     , _polar_theta_axis_zero = 0
     , _polar_theta_axis_nticks = 8
+    , _polar_theta_axis_margin = 10
     , _polar_theta_axis_reverse = False
     }
   
@@ -350,7 +355,8 @@ renderPolar mf pc (w,h) = do
   
   -- axes; repeated code needs to be refactored
   renderRadialGrid coordConv (0,rMax) nThetaTicks gridvs
-  renderRadialAxis coordConv (0,rMax) nThetaTicks labelvs radialAngle (_polar_theta_axis_degrees pc)
+  renderRadialAxis coordConv (0,rMax) (_polar_theta_axis_margin pc)
+    nThetaTicks labelvs radialAngle (_polar_theta_axis_degrees pc)
   
   -- data
   forM_ allPoints paints
@@ -485,6 +491,8 @@ renderRadialAxis ::
   -- ^ convert from r,theta to plot coordinates
   -> (Double, Double)
   -- ^ (min,max) values for the radial axis
+  -> Double
+  -- ^ Margin for the theta-axis labels
   -> Int
   -- ^ Number of tick marks for the theta axis
   -> [Double]
@@ -494,7 +502,7 @@ renderRadialAxis ::
   -> Bool
   -- ^ @True@ if label using degrees, otherwise radians
   -> ChartBackend ()
-renderRadialAxis conv (_,rmax) nticks labelvs rAngle useDeg = do
+renderRadialAxis conv (_,rmax) rmargin nticks labelvs rAngle useDeg = do
   let ls = solidLine 1 $ opaque black
       lblstyle = def
       
@@ -523,6 +531,10 @@ renderRadialAxis conv (_,rmax) nticks labelvs rAngle useDeg = do
         tstep = 360 / fromIntegral nticks
         toffset = 0 :: Double
 
+        -- rmargin is in pixels but need data coordinates for conv,
+        -- so scale it
+        roff = (cr + rmargin) * rmax / cr
+    
     forM_ tindex $ \ti -> 
       let theta = fromIntegral ti * tstep + toffset
           thetar = d2r theta
@@ -530,7 +542,7 @@ renderRadialAxis conv (_,rmax) nticks labelvs rAngle useDeg = do
                 then showD theta ++ [chr 176] -- add in the degree symbol
                 else thetaLabel nticks ti 
           
-      in drawTextTheta conv (rmax*1.05,thetar) txt
+      in drawTextTheta conv (roff,thetar) txt
 
 -- Set up the lenses
 
