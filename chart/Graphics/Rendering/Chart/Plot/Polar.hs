@@ -40,15 +40,13 @@ module Graphics.Rendering.Chart.Plot.Polar(
   -- * Symbols
   
   PolarLayout(..)
-  , PolarChart(..)
   , PolarAxes(..)
-  , PolarPoints(..)
+  , PolarPlot(..)
   , PolarCoord
     
   -- * Rendering  
     
-  , polarToRenderable
-    -- , polarChartToRenderable
+  , polarLayoutToRenderable
     
   -- * Utility routines for creating and displaying axes
     
@@ -61,11 +59,9 @@ module Graphics.Rendering.Chart.Plot.Polar(
   , polarlayout_plot_background
   , polarlayout_title
   , polarlayout_title_style
-  , polarlayout_plot
+  , polarlayout_axes
+  , polarlayout_plots
   , polarlayout_margin
-    
-  , polar_points
-  , polar_axes
     
   , polar_radial_axis_offset
   , polar_theta_axis_zero
@@ -124,19 +120,16 @@ data PolarLayout = PolarLayout
   , _polarlayout_title_style     :: FontStyle
     -- ^ Font style to use for the title.
 
-  , _polarlayout_plot            :: PolarChart
-    -- ^ The data set to plot.
+  , _polarlayout_axes            :: PolarAxes
+    -- ^ Axes for the layout.
+    
+  , _polarlayout_plots           :: [PolarPlot]
+    -- ^ The data to plot.
 
   , _polarlayout_margin          :: Double
     -- ^ The margin distance to use.
   }
 
--- | The data and axes to plot (at present only the data is configureable).
-data PolarChart = PolarChart
-                  { _polar_points :: [PolarPoints]
-                  , _polar_axes :: PolarAxes
-                  }
-                  
 -- | Configuration of the axes of the polar plot.
 --
 --   /TODO:/
@@ -192,23 +185,18 @@ type PolarCoord = (Double, Double)
 --
 --   /TODO:/
 --
---    - Change to something like @PolarPoints r t@
+--    - Change to something like @PolarPlot r t@
 --
-data PolarPoints = PolarPoints
-                   { _polar_points_legend :: String
-                     -- ^ The label for the points (currently unused)
-                   , _polar_points_style :: PointStyle
-                     -- ^ The style used to draw the points
-                   , _polar_points_values :: [PolarCoord]
-                     -- ^ The @(r,&#x03b8;)@ values.
-                   }
+data PolarPlot =
+  PolarPlot
+  { _polar_points_legend :: String
+    -- ^ The label for the points (currently unused)
+  , _polar_points_style :: PointStyle
+    -- ^ The style used to draw the points
+  , _polar_points_values :: [PolarCoord]
+    -- ^ The @(r,&#x03b8;)@ values.
+  }
 
-instance Default PolarChart where
-  def = PolarChart 
-    { _polar_points = []
-    , _polar_axes = def
-    }
-    
 instance Default PolarAxes where
   def = PolarAxes
     { _polar_radial_axis_offset = d2r (45.0/2)
@@ -224,8 +212,8 @@ instance Default PolarAxes where
     , _polar_axes_label_style = def
     }
   
-instance Default PolarPoints where
-  def = PolarPoints
+instance Default PolarPlot where
+  def = PolarPlot
     { _polar_points_legend = ""
     , _polar_points_style  = def
     , _polar_points_values = []
@@ -238,49 +226,33 @@ instance Default PolarLayout where
         , _polarlayout_title           = ""
         , _polarlayout_title_style     = def { _font_size   = 15
                                              , _font_weight = FontWeightBold
-                                             } 
-        , _polarlayout_plot            = def
+                                             }
+        , _polarlayout_axes            = def
+        , _polarlayout_plots           = []
         , _polarlayout_margin          = 0
         }
 
 instance ToRenderable PolarLayout where
-  toRenderable = setPickFn nullPickFn . polarToRenderable
+  toRenderable = setPickFn nullPickFn . polarLayoutToRenderable
 
-{- PieChart has this; not sure wanted here, so leaving out
-instance ToRenderable PolarChart where
-  toRenderable = setPickFn nullPickFn . (polarChartToRenderable Nothing)
--}
-  
--- Hmm, may remove/rename/change
-polarChartToRenderable :: 
-  Maybe FillStyle
-  -> PolarChart
-  -> Renderable (PickFn a)
-polarChartToRenderable mf pc =
-  Renderable { minsize = minsizePolar pc
-             , render  = renderPolar mf pc
-             }
-  
-           
 -- TODO: the rendering needs a lot of clean up
 
 polarPlotToRenderable ::
   PolarLayout
   -> Renderable (PickFn a)
 polarPlotToRenderable pl =
-  let chart = _polarlayout_plot pl
-      dataLayer = polarChartToRenderable (_polarlayout_plot_background pl) chart
-          
-  in dataLayer
+  Renderable { minsize = minsizePolarLayout pl
+             , render  = renderPolarLayout pl
+             }
      
 -- | Render the data, axes, and labels.
 --
 --   At present the axes are always drawn first, and then the data.
 --
-polarToRenderable ::
+polarLayoutToRenderable ::
   PolarLayout
   -> Renderable (PickFn a)
-polarToRenderable pl =
+polarLayoutToRenderable pl =
   fillBackground (_polarlayout_background pl) $ 
   gridToRenderable grid
   where
@@ -298,15 +270,15 @@ polarToRenderable pl =
 
 -- TODO: have to work out extra size here rather than hard code it!
 extraSpace ::
-  PolarChart
+  PolarLayout
   -> ChartBackend (Double, Double)
 extraSpace _ = return (10,10)
 
-minsizePolar ::
-  PolarChart
+minsizePolarLayout ::
+  PolarLayout
   -> ChartBackend (Double, Double)
-minsizePolar pc = do
-  (extraw, extrah) <- extraSpace pc
+minsizePolarLayout pl = do
+  (extraw, extrah) <- extraSpace pl
   return (extraw * 2, extrah * 2)
 
 -- degrees to radians
@@ -314,13 +286,13 @@ d2r :: Double -> Double
 d2r = ((pi/180.0) *) 
 
 getMaxRadii :: 
-  [PolarPoints] 
+  [PolarPlot] 
   -> [Double]
   -- ^ The maximum radii of all the points; this is the radius of the
   --   point plus the radius of the symbol.
 getMaxRadii = concatMap getRs
   where
-    getRs :: PolarPoints -> [Double]
+    getRs :: PolarPlot -> [Double]
     getRs pp = map getR $ _polar_points_values pp
       where
         rad = _point_radius $ _polar_points_style pp
@@ -328,27 +300,26 @@ getMaxRadii = concatMap getRs
 
 -- Remove invalid points (at present that means negative radii).
 --
-filterPoints :: [PolarPoints] -> [PolarPoints]
+filterPoints :: [PolarPlot] -> [PolarPlot]
 filterPoints = filter (not . null . _polar_points_values) . map noNeg
   where
     noNeg pp = pp { _polar_points_values = filter ((>=0) . fst) (_polar_points_values pp) }
 
-renderPolar :: 
-  Maybe FillStyle
-  -> PolarChart 
+renderPolarLayout :: 
+  PolarLayout
   -> (Double, Double) 
   -> ChartBackend (PickFn a)
-renderPolar mf pc (w,h) = do
-  (extraw, extrah) <- extraSpace pc
+renderPolarLayout pl (w,h) = do
+  (extraw, extrah) <- extraSpace pl
   let -- for now assume using a rectangle (0,0) to (w,h)
       center_x = w/2
       center_y = h/2
       
-      pa = _polar_axes pc
+      pa = _polarlayout_axes pl
       
       radius = min (w - 2*extraw) (h - 2*extrah) / 2
       
-      allPoints = filterPoints $ _polar_points pc
+      allPoints = filterPoints $ _polarlayout_plots pl
       rMaxVals = getMaxRadii allPoints
       
       -- scale data using the max of (r+size);
@@ -387,7 +358,7 @@ renderPolar mf pc (w,h) = do
             ps = pstyle { _point_radius = scaleR (_point_radius pstyle) }
         in drawPoint ps px
         
-  case mf of
+  case _polarlayout_plot_background pl of
     Nothing -> return ()
     Just fs -> withFillStyle fs $ 
       alignFillPath (arc' center_x center_y radius 0 (2*pi))
@@ -579,9 +550,8 @@ showThetaLabelRadians n i =
 -- Set up the lenses
 
 $( makeLenses ''PolarLayout )
-$( makeLenses ''PolarChart )
-$( makeLenses ''PolarPoints )
 $( makeLenses ''PolarAxes )
+$( makeLenses ''PolarPlot )
 
 -- Documentation
 --
@@ -611,7 +581,7 @@ $( makeLenses ''PolarAxes )
 -- >
 -- > -- randomly chose r and theta values; the circle radius scales with
 -- > -- r, and the color maps to theta via the LUT.
--- > makeData :: LUT (Colour Double) -> IO [PolarPoints]
+-- > makeData :: LUT (Colour Double) -> IO [PolarPlot]
 -- > makeData lut = do
 -- >   let npts = 150
 -- >       rand = replicateM npts (randomIO :: IO Double)
@@ -644,12 +614,12 @@ $( makeLenses ''PolarAxes )
 -- > bgFill = solidFillStyle (opaque gray)
 -- > pFill = solidFillStyle (withOpacity orange 0.4)
 -- >       
--- > testPlot :: [PolarPoints] -> PolarLayout
+-- > testPlot :: [PolarPlot] -> PolarLayout
 -- > testPlot pps = 
 -- >   polarlayout_title .~ "Polar plot"
 -- >     $ polarlayout_background .~ bgFill
 -- >     $ polarlayout_plot_background .~ Just pFill
--- >     $ polarlayout_plot . polar_points .~ pps
+-- >     $ polarlayout_plots .~ pps
 -- >     $ polarlayout_margin .~ 10
 -- >     $ def
 -- > 
