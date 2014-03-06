@@ -340,7 +340,7 @@ renderPolar ::
   -> ChartBackend (PickFn a)
 renderPolar mf pc (w,h) = do
   (extraw, extrah) <- extraSpace pc
-  let -- for now assume (0,0) to (w,h)
+  let -- for now assume using a rectangle (0,0) to (w,h)
       center_x = w/2
       center_y = h/2
       
@@ -381,23 +381,22 @@ renderPolar mf pc (w,h) = do
         in ( center_x + rr * cos theta'
            , center_y - rr * sin theta' ) 
       
-      paints :: PolarPoints -> ChartBackend ()
-      paints ps = mapM_ (paint (_polar_points_style ps)) $ _polar_points_values ps
-      
       paint :: PointStyle -> PolarCoord -> ChartBackend ()
       paint pstyle rt = 
-        let (x,y) = coordConv rt
+        let px = uncurry Point $ coordConv rt
             ps = pstyle { _point_radius = scaleR (_point_radius pstyle) }
-        in drawPoint ps (Point x y)
+        in drawPoint ps px
         
   case mf of
     Nothing -> return ()
-    Just fs -> withFillStyle fs $ do
-      p <- alignFillPath $ arc' center_x center_y radius 0 (2*pi)
-      fillPath p
+    Just fs -> withFillStyle fs $ 
+      alignFillPath (arc' center_x center_y radius 0 (2*pi))
+      >>= fillPath
   
   renderAxesAndGrid pa coordConv (0,rMax) gridvs labelvs
-  forM_ allPoints paints
+  forM_ allPoints $ \ps ->
+    mapM_ (paint (_polar_points_style ps)) $ _polar_points_values ps
+      
   return nullPickFn
 
 renderAxesAndGrid ::
@@ -427,7 +426,7 @@ renderAxesAndGrid pa conv (rmin,rmax) gridvs labelvs = do
       tstep = 360 / fromIntegral nticks
       tangles = map d2r [0, tstep .. (360-tstep)]
         
-      fgridvs = filter (\r -> r > rmin && r < rmax) gridvs 
+      fgridvs = filter (\r -> r >= rmin && r <= rmax) gridvs 
 
       rmargin = _polar_theta_axis_margin pa
     
@@ -440,8 +439,8 @@ renderAxesAndGrid pa conv (rmin,rmax) gridvs labelvs = do
     
     -- constant theta
     forM_ tangles $ \theta ->
-      let (cx2, cy2) = conv (rmax,theta)
-      in alignStrokePoints [p0, Point cx2 cy2] >>= strokePointPath
+      let p1 = uncurry Point $ conv (rmax,theta)
+      in alignStrokePoints [p0, p1] >>= strokePointPath
 
   -- theta axis
   withLineStyle (_polar_theta_axis_style pa) $
@@ -449,8 +448,8 @@ renderAxesAndGrid pa conv (rmin,rmax) gridvs labelvs = do
 
   -- radial axis
   withLineStyle (_polar_radial_axis_style pa) $
-    let (cx2, cy2) = conv (rmax,rAngle)
-    in alignStrokePoints [p0, Point cx2 cy2] >>= strokePointPath
+    let p1 = uncurry Point $ conv (rmax,rAngle)
+    in alignStrokePoints [p0, p1] >>= strokePointPath
 
   -- axis labels
   -- TODO: improve positioning of labels
