@@ -220,7 +220,7 @@ instance Default PolarAxes where
     , _polar_theta_axis_show = showThetaLabelDegrees
     , _polar_grid_style = dashedLine 1 [2,4] $ opaque lightgrey
     , _polar_theta_axis_style = solidLine 1 $ opaque black
-    , _polar_radial_axis_style = solidLine 0 $ transparent 
+    , _polar_radial_axis_style = solidLine 0 transparent 
     , _polar_axes_label_style = def
     }
   
@@ -328,10 +328,8 @@ getMaxRadii = concatMap getRs
 
 -- Remove invalid points (at present that means negative radii).
 --
--- TODO: clean up to remove empty PolarPoints sections
--- 
 filterPoints :: [PolarPoints] -> [PolarPoints]
-filterPoints = map noNeg
+filterPoints = filter (not . null . _polar_points_values) . map noNeg
   where
     noNeg pp = pp { _polar_points_values = filter ((>=0) . fst) (_polar_points_values pp) }
 
@@ -398,14 +396,8 @@ renderPolar mf pc (w,h) = do
       p <- alignFillPath $ arc' center_x center_y radius 0 (2*pi)
       fillPath p
   
-  -- axes; repeated code needs to be refactored
-  --renderRadialGrid pa coordConv (0,rMax) gridvs
-  --renderRadialAxis pa coordConv (0,rMax) labelvs
   renderAxesAndGrid pa coordConv (0,rMax) gridvs labelvs
-  
-  -- data
   forM_ allPoints paints
-    
   return nullPickFn
 
 renderAxesAndGrid ::
