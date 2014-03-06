@@ -74,6 +74,10 @@ module Graphics.Rendering.Chart.Plot.Polar(
   , polar_theta_axis_reverse
   , polar_radial_axis_show
   , polar_theta_axis_show
+  , polar_grid_style
+  , polar_theta_axis_style
+  , polar_radial_axis_style
+  , polar_axes_label_style
     
   , polar_points_legend
   , polar_points_style
@@ -159,13 +163,25 @@ data PolarAxes =
     -- ^ Set to @True@ to have the angles be measured clockwise; the
     --   default is @False@.
   , _polar_radial_axis_show :: Double -> String
-    -- ^ Create a label for the radial axis
+    -- ^ Create a label for the radial axis. The default is based on `show` but
+    --   drops the @.0@ suffix if present.
   , _polar_theta_axis_show :: Int -> Int -> String
     -- ^ Create a label for the theta axis. Unlike the radial axis the
     --   arguments are the maximum number of ticks (the
     --   @_polar_theta_axis_nticks@ value) and the current tick number
     --   (@0@ to @nticks-1@).
-    --   
+    --
+  , _polar_grid_style :: LineStyle
+    -- ^ The color and style used to draw the grid lines. The default is
+    --   a dashed, light gray, line.
+  , _polar_theta_axis_style :: LineStyle
+    -- ^ The color and style used to draw the theta axis (that is, the
+    --   circumference of the plot). The default is a solid black line.
+  , _polar_radial_axis_style :: LineStyle
+    -- ^ The color and style used to draw the radial axis.
+    --   The default is for there to be no line.
+  , _polar_axes_label_style :: FontStyle
+    -- ^ The font used to draw the axis labels (both radius and @&#x03b8;@).
   }
 
 -- | Radius and &#x03b8; (in radians, measured anti-/counter- clockwise from the
@@ -202,6 +218,10 @@ instance Default PolarAxes where
     , _polar_theta_axis_reverse = False
     , _polar_radial_axis_show = showD
     , _polar_theta_axis_show = showThetaLabelDegrees
+    , _polar_grid_style = dashedLine 1 [2,4] $ opaque lightgrey
+    , _polar_theta_axis_style = solidLine 1 $ opaque black
+    , _polar_radial_axis_style = solidLine 0 $ transparent 
+    , _polar_axes_label_style = def
     }
   
 instance Default PolarPoints where
@@ -379,16 +399,16 @@ renderPolar mf pc (w,h) = do
       fillPath p
   
   -- axes; repeated code needs to be refactored
-  renderRadialGrid pa coordConv (0,rMax) gridvs
-  renderRadialAxis pa coordConv (0,rMax) labelvs
+  --renderRadialGrid pa coordConv (0,rMax) gridvs
+  --renderRadialAxis pa coordConv (0,rMax) labelvs
+  renderAxesAndGrid pa coordConv (0,rMax) gridvs labelvs
   
   -- data
   forM_ allPoints paints
     
   return nullPickFn
-      
--- don't do r<=min and r>=max
-renderRadialGrid ::
+
+renderAxesAndGrid ::
   PolarAxes
   -> (PolarCoord -> (Double,Double))
   -- ^ convert from @(r,theta)@ to plot coordinates
@@ -396,33 +416,76 @@ renderRadialGrid ::
   -- ^ (min,max) values for the radial axis
   -> [Double]
   -- ^ grid positions
+  -> [Double]
+  -- ^ label values and positions
   -> ChartBackend ()
-renderRadialGrid pa conv (rmin,rmax) gridvs = do
+renderAxesAndGrid pa conv (rmin,rmax) gridvs labelvs = do
   let nticks = _polar_theta_axis_nticks pa
+      rAngle = _polar_radial_axis_offset pa
 
-      (cx, cy) = conv (0,0)
+      -- here assuming r=0 is the center
+      (cx,cy) = conv (0,0)
       p0 = Point cx cy
-      step = 360 / fromIntegral nticks
-      angles = map d2r [0, step .. (360-step)]
-      
+
+      getR r = let (cx2,cy2) = conv (r,0)
+               in sqrt $ (cx2-cx)*(cx2-cx) + (cy2-cy)*(cy2-cy)
+      cr = getR rmax
+
+      tindex = [0..nticks-1]
+      tstep = 360 / fromIntegral nticks
+      tangles = map d2r [0, tstep .. (360-tstep)]
+        
       fgridvs = filter (\r -> r > rmin && r < rmax) gridvs 
-      
-  -- having to scale the radius via conv is a bit pointless
-  withLineStyle (dashedLine 1 [2,4] (opaque lightgrey)) $ do
+
+      rmargin = _polar_theta_axis_margin pa
+    
+  -- Draw the grid lines
+  withLineStyle (_polar_grid_style pa) $ do
     -- constant r
     forM_ fgridvs $ \r -> 
-      let (cx2, cy2) = conv (r,0)
-          r' = sqrt $ (cx2-cx)*(cx2-cx) + (cy2-cy)*(cy2-cy)
+      let r' = getR r
       in strokePath $ arc' cx cy r' 0 (2*pi)
     
     -- constant theta
-    forM_ angles $ \theta ->
+    forM_ tangles $ \theta ->
       let (cx2, cy2) = conv (rmax,theta)
       in alignStrokePoints [p0, Point cx2 cy2] >>= strokePointPath
 
+  -- theta axis
+  withLineStyle (_polar_theta_axis_style pa) $
+    strokePath $ arc' cx cy cr 0 (2*pi)
+
+  -- radial axis
+  withLineStyle (_polar_radial_axis_style pa) $
+    let (cx2, cy2) = conv (rmax,rAngle)
+    in alignStrokePoints [p0, Point cx2 cy2] >>= strokePointPath
+
+  -- axis labels
+  -- TODO: improve positioning of labels
+  withFontStyle (_polar_axes_label_style pa) $ do
+    -- radial
+    --
+    -- TODO: using thetaLabelOffsets isn't quite right here - e.g.
+    -- if the axis were horizontal we'd want HTA_Center VTA_Top
+    -- rather than HTA_Left VTA_Center but leave as is for now
+    forM_ labelvs $ \r -> 
+      drawTextTheta conv (r,rAngle) $ _polar_radial_axis_show pa r
+    
+    -- theta
+    --
+    -- rmargin is in pixels but need data coordinates for conv,
+    -- so scale it
+    let roff = (cr + rmargin) * rmax / cr
+    
+    forM_ (zip tindex tangles) $ \(ti,theta) -> 
+      let txt = _polar_theta_axis_show pa nticks ti
+      in drawTextTheta conv (roff,theta) txt
+
 -- Represent label positions about the polar plot by what "zone" they are
 -- in. The zone is based on quadrants, but I provide special cases for
--- positions close to n pi / 2 (n=0, 1, 2, 3)
+-- positions close to n pi / 2 (n=0, 1, 2, 3). This is a quick hack to
+-- improve label positioning but is not likely to be sufficient.
+--
 
 data Zone =
   ZR | ZT | ZL | ZB -- the four "cardinal" locations (right, top, left, or bottom)
@@ -521,61 +584,6 @@ showThetaLabelRadians n i =
   in if g == 1
      then piFrac j n
      else piFrac (j `div` g) (n `div` g)
-
--- Does both r and theta
-renderRadialAxis ::
-  PolarAxes
-  -> (PolarCoord -> (Double,Double))
-  -- ^ convert from r,theta to plot coordinates
-  -> (Double, Double)
-  -- ^ (min,max) values for the radial axis
-  -> [Double]
-  -- ^ label values and positions
-  -> ChartBackend ()
-renderRadialAxis pa conv (_,rmax) labelvs = do
-  let nticks = _polar_theta_axis_nticks pa
-      rAngle = _polar_radial_axis_offset pa
-      rmargin = _polar_theta_axis_margin pa
-    
-      ls = solidLine 1 $ opaque black
-      lblstyle = def
-      
-      -- here assuming r=0 is the center; would be a bit simpler to
-      -- get cr if also knew the theta offset
-      (cx,cy) = conv (0,0)
-      (cx2,cy2) = conv (rmax,0)
-      cr = sqrt $ (cx2-cx)*(cx2-cx) + (cy2-cy)*(cy2-cy)
-      
-  -- theta axis
-  withLineStyle ls $
-    strokePath $ arc' cx cy cr 0 (2*pi)
-  
-  -- axis labels
-  -- TODO: improve positioning of labels
-  withFontStyle lblstyle $ do
-    -- radial
-    --
-    -- TODO: using thetaLabelOffsets isn't quite right here - e.g.
-    -- if the axis were horizontal we'd want HTA_Center VTA_Top
-    -- rather than HTA_Left VTA_Center but leave as is for now
-    forM_ labelvs $ \r -> 
-      drawTextTheta conv (r,rAngle) $ _polar_radial_axis_show pa r
-    
-    -- theta
-    let tindex = [0 .. nticks-1]
-        tstep = 360 / fromIntegral nticks
-        toffset = 0 :: Double
-
-        -- rmargin is in pixels but need data coordinates for conv,
-        -- so scale it
-        roff = (cr + rmargin) * rmax / cr
-    
-    forM_ tindex $ \ti -> 
-      let theta = fromIntegral ti * tstep + toffset
-          thetar = d2r theta
-          txt = _polar_theta_axis_show pa nticks ti
-          
-      in drawTextTheta conv (roff,thetar) txt
 
 -- Set up the lenses
 
