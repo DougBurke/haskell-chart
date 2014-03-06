@@ -61,6 +61,7 @@ module Graphics.Rendering.Chart.Plot.Polar(
   , polarlayout_title_style
   , polarlayout_axes
   , polarlayout_plots
+  , polarlayout_legend
   , polarlayout_margin
     
   , polar_radial_axis_offset
@@ -81,6 +82,7 @@ module Graphics.Rendering.Chart.Plot.Polar(
   )
        where
 
+import Control.Arrow ((&&&))
 import Control.Monad (forM_)
 import Control.Lens
 
@@ -95,7 +97,8 @@ import Graphics.Rendering.Chart.Axis.Internal (scaleLinear, showD)
 import Graphics.Rendering.Chart.Backend.Types
 import Graphics.Rendering.Chart.Drawing
 import Graphics.Rendering.Chart.Geometry
-import Graphics.Rendering.Chart.Grid (aboveN, gridToRenderable, tval, weights)
+import Graphics.Rendering.Chart.Grid (aboveN, besideN, gridToRenderable, tval, weights)
+import Graphics.Rendering.Chart.Legend
 import Graphics.Rendering.Chart.Renderable
 import Graphics.Rendering.Chart.Utils (maximum0)
 
@@ -126,6 +129,9 @@ data PolarLayout = PolarLayout
   , _polarlayout_plots           :: [PolarPlot]
     -- ^ The data to plot.
 
+  , _polarlayout_legend          :: Maybe LegendStyle
+    -- ^ Style the legend area
+    
   , _polarlayout_margin          :: Double
     -- ^ The margin distance to use.
   }
@@ -187,6 +193,9 @@ type PolarCoord = (Double, Double)
 --
 --    - Change to something like @PolarPlot r t@
 --
+--    - want a "base" type a la @Plot r t@ which we can convert
+--      specific types to
+--
 data PolarPlot =
   PolarPlot
   { _polar_points_legend :: String
@@ -229,6 +238,7 @@ instance Default PolarLayout where
                                              }
         , _polarlayout_axes            = def
         , _polarlayout_plots           = []
+        , _polarlayout_legend          = Nothing
         , _polarlayout_margin          = 0
         }
 
@@ -262,11 +272,42 @@ polarLayoutToRenderable pl =
     grid = aboveN
          [ tval $ addMargins (lm/2,0,0,0) (setPickFn nullPickFn title)
          , weights (1,1) $ tval $
-           addMargins (lm,lm,lm,lm) $
-           polarPlotToRenderable pl
-           -- for when we support legends
-           -- , tval $ renderLegend pl (getLegendItems pl)
+           addMargins (lm,lm,lm,lm) $ polarPlotToRenderable pl
+         , tval $ renderLegends pl
          ]
+
+-- TODO: this knowledge encoded in conversion routines from specific plot types
+--       to a generic polar plot type (e.g. matching PlotPoints x y -> Plot x y)
+--
+-- Layout has getLegendItems and renderLegend which I have squashed into one for now
+    
+renderLegends :: PolarLayout -> Renderable (PickFn a)
+renderLegends pl =
+  let legItems = map (_polar_points_legend &&& renderPlotLegendPoints) $ _polarlayout_plots pl
+      
+      g = besideN [ tval $ mkLegend (_polarlayout_legend pl) (_polarlayout_margin pl) legItems
+                  , weights (1,1) $ tval emptyRenderable ]
+  in gridToRenderable g
+
+renderPlotLegendPoints :: PolarPlot -> Rect -> ChartBackend ()
+renderPlotLegendPoints p (Rect p1 p2) =
+  let ymid = ((p_y p1 + p_y p2)/2)
+      ps = _polar_points_style p
+      draw x = drawPoint ps (Point x ymid)
+      x1 = p_x p1
+      x2 = p_x p2
+  in mapM_ draw [x1, (x1+x2)/2, x2]
+
+-- Should this be exported by Layout?
+type LegendItem = (String,Rect -> ChartBackend ())
+
+mkLegend :: Maybe LegendStyle -> Double -> [LegendItem] -> Renderable (PickFn a)
+mkLegend mls lm vals = case mls of
+    Nothing -> emptyRenderable
+    Just ls ->  case filter ((/="").fst) vals of
+        []  -> emptyRenderable ;
+        lvs -> addMargins (0,lm,lm,lm) $
+                   setPickFn nullPickFn $ legendToRenderable (Legend ls lvs)
 
 -- TODO: have to work out extra size here rather than hard code it!
 extraSpace ::
@@ -645,6 +686,4 @@ $( makeLenses ''PolarPlot )
 --     size calculations.
 --
 --   - generalize the approach for other non-cartesian projections
---
---   - add support for legends
 --
