@@ -4,7 +4,7 @@
 -- Copyright   :  (c) Tim Docker 2014
 -- License     :  BSD-style (see chart/COPYRIGHT)
 --
--- Plot data using polar @(r, theta)@ coordinates. This should probably be
+-- Plot data using polar @(r, &#x03b8;)@ coordinates. This should probably be
 -- in the @Layout@ or @Axis@ section, but for simplicity it is placed here.
 --
 -- At present it is unclear how many types used by the standard
@@ -50,6 +50,11 @@ module Graphics.Rendering.Chart.Plot.Polar(
   , polarToRenderable
     -- , polarChartToRenderable
     
+  -- * Utility routines for creating and displaying axes
+    
+  , showThetaLabelDegrees
+  , showThetaLabelRadians
+    
   -- * Lenses
     
   , polarlayout_background
@@ -63,11 +68,12 @@ module Graphics.Rendering.Chart.Plot.Polar(
   , polar_axes
     
   , polar_radial_axis_offset
-  , polar_theta_axis_degrees
   , polar_theta_axis_zero
   , polar_theta_axis_nticks
   , polar_theta_axis_margin
   , polar_theta_axis_reverse
+  , polar_radial_axis_show
+  , polar_theta_axis_show
     
   , polar_points_legend
   , polar_points_style
@@ -134,28 +140,33 @@ data PolarChart = PolarChart
 --    - allow the labelling to be set: go from axis value to
 --      the label, alignment, ...
 --
-data PolarAxes = PolarAxes 
-                 { _polar_radial_axis_offset :: Double
-                   -- ^ The offset, in radians, from the location of the
-                   --   @&#x03b8;=0@ axis at which to label the radial axis.
-                   --   The default is @&#x03c0;/8@.
-                 , _polar_theta_axis_degrees :: Bool
-                   -- ^ Label the &#x03b8; axis in degrees (@True@) or radians (@False@),
-                   --   in the latter case using \"units\" of @&#x03c0;@ (e.g. @&#x03c0;/2@).
-                   --   The default is @True@.
-                 , _polar_theta_axis_zero :: Double
-                   -- ^ Angle, in radians, measured counter-/anti- clockwise from the horizontal,
-                   --   to use for @&#x03b8;=0@. The default is @0@.
-                 , _polar_theta_axis_nticks :: Int
-                   -- ^ The number of tick marks on the theta axis; the default is 8 which gives
-                   --   a spacing of 45 degrees. The value is assumed to be greater than 1.
-                 , _polar_theta_axis_margin :: Double
-                   -- ^ The distance between the maximum radius and the theta labels,
-                   --   in display coordinates
-                 , _polar_theta_axis_reverse :: Bool
-                   -- ^ Set to @True@ to have the angles be measured clockwise; the
-                   --   default is @False@.
-                 }
+data PolarAxes = 
+  PolarAxes 
+  { _polar_radial_axis_offset :: Double
+    -- ^ The offset, in radians, from the location of the
+    --   @&#x03b8;=0@ axis at which to label the radial axis.
+    --   The default is @&#x03c0;/8@.
+  , _polar_theta_axis_zero :: Double
+    -- ^ Angle, in radians, measured counter-/anti- clockwise from the horizontal,
+    --   to use for @&#x03b8;=0@. The default is @0@.
+  , _polar_theta_axis_nticks :: Int
+    -- ^ The number of tick marks on the theta axis; the default is 8 which gives
+    --   a spacing of 45 degrees. The value is assumed to be greater than 1.
+  , _polar_theta_axis_margin :: Double
+    -- ^ The distance between the maximum radius and the theta labels,
+    --   in display coordinates
+  , _polar_theta_axis_reverse :: Bool
+    -- ^ Set to @True@ to have the angles be measured clockwise; the
+    --   default is @False@.
+  , _polar_radial_axis_show :: Double -> String
+    -- ^ Create a label for the radial axis
+  , _polar_theta_axis_show :: Int -> Int -> String
+    -- ^ Create a label for the theta axis. Unlike the radial axis the
+    --   arguments are the maximum number of ticks (the
+    --   @_polar_theta_axis_nticks@ value) and the current tick number
+    --   (@0@ to @nticks-1@).
+    --   
+  }
 
 -- | Radius and &#x03b8; (in radians, measured anti-/counter- clockwise from the
 --   X axis). Points with a negative radius are excluded from the plot.
@@ -185,11 +196,12 @@ instance Default PolarChart where
 instance Default PolarAxes where
   def = PolarAxes
     { _polar_radial_axis_offset = d2r (45.0/2)
-    , _polar_theta_axis_degrees = True
     , _polar_theta_axis_zero = 0
     , _polar_theta_axis_nticks = 8
     , _polar_theta_axis_margin = 10
     , _polar_theta_axis_reverse = False
+    , _polar_radial_axis_show = showD
+    , _polar_theta_axis_show = showThetaLabelDegrees
     }
   
 instance Default PolarPoints where
@@ -315,8 +327,6 @@ renderPolar mf pc (w,h) = do
       center_y = h/2
       
       pa = _polar_axes pc
-      radialAngle = _polar_radial_axis_offset pa
-      nThetaTicks = _polar_theta_axis_nticks pa
       
       radius = min (w - 2*extraw) (h - 2*extrah) / 2
       
@@ -369,9 +379,8 @@ renderPolar mf pc (w,h) = do
       fillPath p
   
   -- axes; repeated code needs to be refactored
-  renderRadialGrid coordConv (0,rMax) nThetaTicks gridvs
-  renderRadialAxis coordConv (0,rMax) (_polar_theta_axis_margin pa)
-    nThetaTicks labelvs radialAngle (_polar_theta_axis_degrees pa)
+  renderRadialGrid pa coordConv (0,rMax) gridvs
+  renderRadialAxis pa coordConv (0,rMax) labelvs
   
   -- data
   forM_ allPoints paints
@@ -380,17 +389,18 @@ renderPolar mf pc (w,h) = do
       
 -- don't do r<=min and r>=max
 renderRadialGrid ::
-  (PolarCoord -> (Double,Double))
+  PolarAxes
+  -> (PolarCoord -> (Double,Double))
   -- ^ convert from @(r,theta)@ to plot coordinates
   -> (Double, Double)
   -- ^ (min,max) values for the radial axis
-  -> Int
-  -- ^ Number of tick marks for the theta axis
   -> [Double]
   -- ^ grid positions
   -> ChartBackend ()
-renderRadialGrid conv (rmin,rmax) nticks gridvs = do
-  let (cx, cy) = conv (0,0)
+renderRadialGrid pa conv (rmin,rmax) gridvs = do
+  let nticks = _polar_theta_axis_nticks pa
+
+      (cx, cy) = conv (0,0)
       p0 = Point cx cy
       step = 360 / fromIntegral nticks
       angles = map d2r [0, step .. (360-step)]
@@ -479,22 +489,34 @@ drawTextTheta conv p txt =
       (lxoff,lyoff) = thetaLabelOffsets $ atan2 dy dx
   in drawTextA lxoff lyoff (Point lx ly) txt
                         
-piChar :: Char
-piChar = chr 0x03c0
+-- | Convert a theta label value into the string to be displayed.
+-- 
+--   This is the default setting for `PolarAxes`.
+showThetaLabelDegrees ::
+  Int       -- ^ the number of \"ticks\" to show, @nmax@, assumed to be greater than 1.
+  -> Int    -- ^ "number" of the current \"tick mark\"; varies from @0@ to @nmax-1@ inclusive.
+  -> String -- ^ the @&#x03b8;@ value in degrees, including the degrees symbol
+showThetaLabelDegrees n i = 
+  let a = 360.0 :: Double
+  in showD (a * fromIntegral i / fromIntegral n) ++ [chr 176]
 
-piFrac :: Int -> Int -> String
-piFrac 1 1 = [piChar]
-piFrac 1 n = piChar : "/" ++ show n
-piFrac j 1 = show j ++ [piChar]
-piFrac j n = show j ++ piChar : "/" ++ show n
+-- | Convert a theta label value into the string to be displayed.
+-- 
+showThetaLabelRadians ::
+  Int       -- ^ the number of \"ticks\" to show, @nmax@, assumed to be greater than 1.
+  -> Int    -- ^ "number" of the current \"tick mark\"; varies from @0@ to @nmax-1@ inclusive.
+  -> String -- ^ the @&#x03b8;@ value in units of @&#x03c0;@.
+showThetaLabelRadians _ 0 = "0"
+showThetaLabelRadians n i = 
+  let piChar = chr 0x03c0
 
-thetaLabel :: 
-  Int -- ^ number of ticks, assumed to be > 1
-  -> Int -- ^ current tick number (0 to nticks-1)
-  -> String -- ^ label (using the pi character)
-thetaLabel _ 0 = "0"
-thetaLabel n i = 
-  let j = 2*i
+      piFrac :: Int -> Int -> String
+      piFrac 1 1 = [piChar]
+      piFrac 1 b = piChar : "/" ++ show b
+      piFrac a 1 = show a ++ [piChar]
+      piFrac a b = show a ++ piChar : "/" ++ show b
+
+      j = 2*i
       g = gcd j n
   in if g == 1
      then piFrac j n
@@ -502,23 +524,20 @@ thetaLabel n i =
 
 -- Does both r and theta
 renderRadialAxis ::
-  (PolarCoord -> (Double,Double))
+  PolarAxes
+  -> (PolarCoord -> (Double,Double))
   -- ^ convert from r,theta to plot coordinates
   -> (Double, Double)
   -- ^ (min,max) values for the radial axis
-  -> Double
-  -- ^ Margin for the theta-axis labels
-  -> Int
-  -- ^ Number of tick marks for the theta axis
   -> [Double]
   -- ^ label values and positions
-  -> Double
-  -- ^ angle (degrees, anti/counter clockwise) for the radial labels to be drawn
-  -> Bool
-  -- ^ @True@ if label using degrees, otherwise radians
   -> ChartBackend ()
-renderRadialAxis conv (_,rmax) rmargin nticks labelvs rAngle useDeg = do
-  let ls = solidLine 1 $ opaque black
+renderRadialAxis pa conv (_,rmax) labelvs = do
+  let nticks = _polar_theta_axis_nticks pa
+      rAngle = _polar_radial_axis_offset pa
+      rmargin = _polar_theta_axis_margin pa
+    
+      ls = solidLine 1 $ opaque black
       lblstyle = def
       
       -- here assuming r=0 is the center; would be a bit simpler to
@@ -539,7 +558,8 @@ renderRadialAxis conv (_,rmax) rmargin nticks labelvs rAngle useDeg = do
     -- TODO: using thetaLabelOffsets isn't quite right here - e.g.
     -- if the axis were horizontal we'd want HTA_Center VTA_Top
     -- rather than HTA_Left VTA_Center but leave as is for now
-    forM_ labelvs $ \r -> drawTextTheta conv (r,rAngle) $ show r
+    forM_ labelvs $ \r -> 
+      drawTextTheta conv (r,rAngle) $ _polar_radial_axis_show pa r
     
     -- theta
     let tindex = [0 .. nticks-1]
@@ -553,9 +573,7 @@ renderRadialAxis conv (_,rmax) rmargin nticks labelvs rAngle useDeg = do
     forM_ tindex $ \ti -> 
       let theta = fromIntegral ti * tstep + toffset
           thetar = d2r theta
-          txt = if useDeg
-                then showD theta ++ [chr 176] -- add in the degree symbol
-                else thetaLabel nticks ti 
+          txt = _polar_theta_axis_show pa nticks ti
           
       in drawTextTheta conv (roff,thetar) txt
 
@@ -653,11 +671,9 @@ $( makeLenses ''PolarAxes )
 --
 --   - how to combine multiple data sets
 --
---   - fix up axis positioning and size calculation
---
---   - add configuration to allow for adjusting the angle at which the
---     radius is displayed, the position angle of 0, switch to clockwise
---     direction for theta, label in radians, ...
+--   - fix up axis positioning and size calculation; this is mainly improving
+--     the position of the axis tick labels and including this info in the
+--     size calculations.
 --
 --   - generalize the approach for other non-cartesian projections
 --
