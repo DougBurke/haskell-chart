@@ -96,6 +96,7 @@ import Graphics.Rendering.Chart.Geometry
 import Graphics.Rendering.Chart.Grid (aboveN, besideN, gridToRenderable, tval, weights)
 import Graphics.Rendering.Chart.Legend
 import Graphics.Rendering.Chart.Plot.Points
+import Graphics.Rendering.Chart.Plot.Types
 import Graphics.Rendering.Chart.Renderable
 import Graphics.Rendering.Chart.Utils (maximum0)
 
@@ -213,6 +214,10 @@ instance Default PolarLayout where
         , _polarlayout_margin          = 0
         }
 
+data Axes2T r t = Axes2T {
+  _axisnct_conv :: (r, t) -> (Double, Double)
+  }
+
 instance ToRenderable PolarLayout where
   toRenderable = setPickFn nullPickFn . polarLayoutToRenderable
 
@@ -229,16 +234,21 @@ polarLayoutToRenderable pl =
   fillBackground (_polarlayout_background pl) $ 
   gridToRenderable grid
   where
-    title = label (_polarlayout_title_style pl) HTA_Centre VTA_Top (_polarlayout_title pl)
     lm    = _polarlayout_margin pl
 
     r = Renderable { minsize = minsizePolarLayout pl, render = renderPolarLayout pl }
     
     grid = aboveN
-         [ tval $ addMargins (lm/2,0,0,0) (setPickFn nullPickFn title)
+         [ tval $ titleToRenderable lm (_polarlayout_title_style pl) (_polarlayout_title pl)
          , weights (1,1) $ tval $ addMargins (lm,lm,lm,lm) r
          , tval $ renderLegends pl
          ]
+
+titleToRenderable :: Double -> FontStyle -> String -> Renderable (PickFn a)
+titleToRenderable _  _  "" = emptyRenderable
+titleToRenderable lm fs s = addMargins (lm/2,0,0,0) (setPickFn nullPickFn title)
+  where
+    title = label fs HTA_Centre VTA_Centre s
 
 -- TODO: this knowledge encoded in conversion routines from specific plot types
 --       to a generic polar plot type (e.g. matching PlotPoints x y -> Plot x y)
@@ -290,6 +300,7 @@ minsizePolarLayout pl = do
 d2r :: Double -> Double
 d2r = ((pi/180.0) *) 
 
+{-
 getMaxRadii :: 
   [PlotPoints Double Double] 
   -> [Double]
@@ -302,6 +313,13 @@ getMaxRadii = concatMap getRs
       where
         rad = _point_radius $ _plot_points_style pp
         getR = (rad +) . fst
+-}
+
+-- Now ignoring the radius since it is in pixel units
+getMaxRadii ::
+  [PlotPoints Double Double] 
+  -> [Double]
+getMaxRadii = concatMap (map fst . _plot_points_values)
 
 -- Remove invalid points (at present that means negative radii).
 --
@@ -327,7 +345,10 @@ renderPolarLayout pl (w,h) = do
       
       radius = min (w - 2*extraw) (h - 2*extrah) / 2
       
-      allPoints = filterPoints $ _polarlayout_plots pl
+      polarPlots = _polarlayout_plots pl
+      plots = map toPlot polarPlots
+      
+      allPoints = filterPoints polarPlots
       rMaxVals = getMaxRadii allPoints
       
       -- scale data using the max of (r+size);
@@ -360,27 +381,37 @@ renderPolarLayout pl (w,h) = do
         in ( center_x + rr * cos theta'
            , center_y - rr * sin theta' ) 
       
+      {-
       paint :: PointStyle -> PolarCoord -> ChartBackend ()
       paint pstyle rt = 
         let px = uncurry Point $ coordConv rt
             ps = pstyle { _point_radius = scaleR (_point_radius pstyle) }
         in drawPoint ps px
-        
+      -}  
+      
+      axis = Axes2T coordConv
+           
   case _polarlayout_plot_background pl of
     Nothing -> return ()
     Just fs -> withFillStyle fs $ 
       alignFillPath (arc' center_x center_y radius 0 (2*pi))
       >>= fillPath
   
-  renderAxesAndGrid pa coordConv (0,rMax) gridvs labelvs
+  -- QUS: would it make sense to do the grid/axis within the clip
+  --      region too?
+  renderAxesAndGrid pa axis (0,rMax) gridvs labelvs
+  withClipRegion (Rect (Point 0 0) (Point w h)) $
+    mapM_ (renderSinglePlot (w,h) (Just axis)) plots
+  {-
   forM_ allPoints $ \ps ->
     mapM_ (paint (_plot_points_style ps)) $ _plot_points_values ps
-      
+  -}    
+  
   return nullPickFn
 
 renderAxesAndGrid ::
   PolarAxes
-  -> (PolarCoord -> (Double,Double))
+  -> Axes2T Double Double
   -- ^ convert from @(r,theta)@ to plot coordinates
   -> (Double, Double)
   -- ^ (min,max) values for the radial axis
@@ -389,10 +420,12 @@ renderAxesAndGrid ::
   -> [Double]
   -- ^ label values and positions
   -> ChartBackend ()
-renderAxesAndGrid pa conv (rmin,rmax) gridvs labelvs = do
+renderAxesAndGrid pa axis (rmin,rmax) gridvs labelvs = do
   let nticks = _polar_theta_axis_nticks pa
       rAngle = _polar_radial_axis_offset pa
 
+      conv = _axisnct_conv axis
+  
       -- here assuming r=0 is the center
       (cx,cy) = conv (0,0)
       p0 = Point cx cy
@@ -554,6 +587,28 @@ showThetaLabelRadians n i =
   in if g == 1
      then piFrac j n
      else piFrac (j `div` g) (n `div` g)
+
+-- | Render a single set of plot data onto a plot area of given size using
+--   the given axes.
+renderSinglePlot :: RectSize -> Maybe (Axes2T r t) -> Plot r t -> ChartBackend ()
+renderSinglePlot _ (Just (Axes2T axConv)) p =
+  {-
+  let xr = optPairReverse xrev (0, w)
+      yr = optPairReverse yrev (h, 0)
+      -- yrange = if yrev then (0, h) else (h, 0)
+      pmfn (x,y) = Point (mapv xr (_axis_viewport xaxis xr) x)
+                         (mapv yr (_axis_viewport yaxis yr) y)
+      mapv lims _ LMin       = fst lims
+      mapv lims _ LMax       = snd lims
+      mapv _    f (LValue v) = f v
+  in _plot_render p pmfn
+  -}
+  let conv (LValue a, LValue b) = uncurry Point $ axConv (a,b)
+      conv _ = Point 0 0 -- TODO: how to handle invlid points?
+      
+  in _plot_render p conv
+  
+renderSinglePlot _ _ _ = return ()
 
 -- Set up the lenses
 
