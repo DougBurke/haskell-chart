@@ -5,11 +5,11 @@
 -- License     :  BSD-style (see chart/COPYRIGHT)
 --
 -- Plot data using polar @(r, &#x03b8;)@ coordinates. This should probably be
--- in the @Layout@ or @Axis@ section, but for simplicity it is placed here.
+-- in the @Layout@ or @Axis@ section, but for simplicity it is placed here
+-- (some refactoring is currently taking place to make better use of the
+-- existing code/functionality).
 --
--- At present it is unclear how many types used by the standard
--- Cartesian plots - e.g. `PlotPoints` or `ToPlot` - can be shared
--- with this. I personally am more interested in seeing how to
+-- I personally am more interested in seeing how to
 -- expand Chart to more-complex projections such as those used in
 -- Astronomy (<http://www.atnf.csiro.au/people/mcalabre/WCS/>),
 -- but there is plenty of complication if we just stick to the
@@ -41,7 +41,6 @@ module Graphics.Rendering.Chart.Plot.Polar(
   
   PolarLayout(..)
   , PolarAxes(..)
-  , PolarCoord
     
   -- * Rendering  
     
@@ -78,7 +77,6 @@ module Graphics.Rendering.Chart.Plot.Polar(
   )
        where
 
-import Control.Arrow ((&&&))
 import Control.Monad (forM_)
 import Control.Lens
 
@@ -95,7 +93,6 @@ import Graphics.Rendering.Chart.Drawing
 import Graphics.Rendering.Chart.Geometry
 import Graphics.Rendering.Chart.Grid (aboveN, besideN, gridToRenderable, tval, weights)
 import Graphics.Rendering.Chart.Legend
-import Graphics.Rendering.Chart.Plot.Points
 import Graphics.Rendering.Chart.Plot.Types
 import Graphics.Rendering.Chart.Renderable
 import Graphics.Rendering.Chart.Utils (maximum0)
@@ -124,8 +121,9 @@ data PolarLayout = PolarLayout
   , _polarlayout_axes            :: PolarAxes
     -- ^ Axes for the layout.
     
-  , _polarlayout_plots           :: [PlotPoints Double Double]
-    -- ^ The data to plot.
+  , _polarlayout_plots           :: [Plot Double Double]
+    -- ^ The data to plot. It is not guaranteed that all plot types will
+    --   display well!
 
   , _polarlayout_legend          :: Maybe LegendStyle
     -- ^ Style the legend area
@@ -135,11 +133,6 @@ data PolarLayout = PolarLayout
   }
 
 -- | Configuration of the axes of the polar plot.
---
---   /TODO:/
---
---    - allow the labelling to be set: go from axis value to
---      the label, alignment, ...
 --
 data PolarAxes = 
   PolarAxes 
@@ -257,12 +250,13 @@ titleToRenderable lm fs s = addMargins (lm/2,0,0,0) (setPickFn nullPickFn title)
     
 renderLegends :: PolarLayout -> Renderable (PickFn a)
 renderLegends pl =
-  let legItems = map (_plot_points_title &&& renderPlotLegendPoints) $ _polarlayout_plots pl
+  let legItems = concatMap _plot_legend $ _polarlayout_plots pl
       
       g = besideN [ tval $ mkLegend (_polarlayout_legend pl) (_polarlayout_margin pl) legItems
                   , weights (1,1) $ tval emptyRenderable ]
   in gridToRenderable g
 
+{- TODO: update Plot.renderPlotLegendPoints ?
 renderPlotLegendPoints :: PlotPoints Double Double -> Rect -> ChartBackend ()
 renderPlotLegendPoints p (Rect p1 p2) =
   let ymid = ((p_y p1 + p_y p2)/2)
@@ -271,6 +265,7 @@ renderPlotLegendPoints p (Rect p1 p2) =
       x1 = p_x p1
       x2 = p_x p2
   in mapM_ draw [x1, (x1+x2)/2, x2]
+-}
 
 -- Should this be exported by Layout?
 type LegendItem = (String,Rect -> ChartBackend ())
@@ -317,16 +312,23 @@ getMaxRadii = concatMap getRs
 
 -- Now ignoring the radius since it is in pixel units
 getMaxRadii ::
-  [PlotPoints Double Double] 
+  [Plot Double Double] 
   -> [Double]
-getMaxRadii = concatMap (map fst . _plot_points_values)
+getMaxRadii = concatMap (fst . _plot_all_points)
 
 -- Remove invalid points (at present that means negative radii).
 --
-filterPoints :: [PlotPoints Double Double] -> [PlotPoints Double Double]
-filterPoints = filter (not . null . _plot_points_values) . map noNeg
+-- Any empty plots are removed, but it does *not* remove the
+-- corresponding item from the legend. This may or may not be
+-- a good thing.
+--
+filterPoints :: [Plot Double Double] -> [Plot Double Double]
+filterPoints = filter (not . null . fst . _plot_all_points) . map noNeg
   where
-    noNeg pp = pp { _plot_points_values = filter ((>=0) . fst) (_plot_points_values pp) }
+    noNeg pp = 
+      let pts = uncurry zip $ _plot_all_points pp
+          fpts = filter ((>=0) . fst) pts
+      in pp { _plot_all_points = unzip fpts }
 
 -- Assumptions:
 --    rectangle (0,0) to (w,h)
@@ -345,10 +347,9 @@ renderPolarLayout pl (w,h) = do
       
       radius = min (w - 2*extraw) (h - 2*extrah) / 2
       
-      polarPlots = _polarlayout_plots pl
-      plots = map toPlot polarPlots
+      plots = _polarlayout_plots pl
       
-      allPoints = filterPoints polarPlots
+      allPoints = filterPoints plots
       rMaxVals = getMaxRadii allPoints
       
       -- scale data using the max of (r+size);
@@ -648,6 +649,14 @@ $( makeLenses ''PolarAxes )
 -- >   let npts = 150
 -- >       rand = replicateM npts (randomIO :: IO Double)
 -- >       shapes = [ PointShapeCircle
+-- >                , PointShapeCircle
+-- >                , PointShapeCircle
+-- >                , PointShapeCircle
+-- >                , PointShapeCircle
+-- >                , PointShapeCircle
+-- >                , PointShapePolygon 3 True
+-- >                , PointShapePolygon 4 True
+-- >                , PointShapePolygon 5 True
 -- >                , PointShapePolygon 6 True
 -- >                , PointShapePlus
 -- >                , PointShapeCross
@@ -657,13 +666,13 @@ $( makeLenses ''PolarAxes )
 -- >   r2 <- rand
 -- >   shps <- replicateM npts (randomRIO (0,length shapes -1))
 -- >   let rs = map (2*) r1
--- >       rads = map (*0.1) rs
+-- >       rads = zipWith (\ra rb -> sqrt (ra*100) * rb) rs r3
 -- >       cols = map (flip withOpacity 0.4 . fromLUT lut) r2
--- >       thetas = fmap (2*pi*) r2
+-- >       thetas = map (2*pi*) r2
 -- >       pitem (r,t,s,c,shp) = plot_points_style .~ pstyle s c shp
 -- >                           $ plot_points_values .~ [(r,t)]
 -- >                           $ def
--- >       pstyle s c shp = point_shape .! shapes !! shp
+-- >       pstyle s c shp = point_shape .~ shapes !! shp
 -- >                      $ point_color .~ c
 -- >                      $ point_radius .~ s
 -- >                      $ point_border_color .~ opaque black
@@ -672,16 +681,24 @@ $( makeLenses ''PolarAxes )
 -- >                    
 -- >   return $ map pitem $ zip5 rs thetas rads cols
 -- > 
+-- > lPlot :: PlotLines Double Double
+-- > lPlot =
+-- >   let lvs = map (\r -> (r, 2*pi*r)) [0, 0.01 .. 2]
+-- >   in plot_lines_values .~ [lvs]
+-- >      $ plot_lines_style . line_color .~ withOpacity red 0.4
+-- >      $ plot_lines_style . line_width .~ 2
+-- >      $ def
+-- > 
 -- > bgFill, pFill :: FillStyle
 -- > bgFill = solidFillStyle (opaque gray)
 -- > pFill = solidFillStyle (withOpacity orange 0.4)
 -- >       
--- > testPlot :: [PlotPoints Double Double] -> PolarLayout
+-- > testPlot :: ToPlot p => [p Double Double] -> PolarLayout
 -- > testPlot pps = 
 -- >   polarlayout_title .~ "Polar plot"
 -- >     $ polarlayout_background .~ bgFill
 -- >     $ polarlayout_plot_background .~ Just pFill
--- >     $ polarlayout_plots .~ pps
+-- >     $ polarlayout_plots .~ lPlot : map toPlot pps
 -- >     $ polarlayout_margin .~ 10
 -- >     $ def
 -- > 
@@ -696,11 +713,7 @@ $( makeLenses ''PolarAxes )
 -- This is /not/ intended as a usable API, more as an exploration of the
 -- design space. Issues include:
 --
---   - support for lines, histogram-style plots, ...
---
 --   - allow theta values to be given in radians or degrees
---
---   - how to combine multiple data sets
 --
 --   - fix up axis positioning and size calculation; this is mainly improving
 --     the position of the axis tick labels and including this info in the
