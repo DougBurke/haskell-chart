@@ -322,6 +322,14 @@ getMaxRadii = concatMap (fst . _plot_all_points)
 -- corresponding item from the legend. This may or may not be
 -- a good thing.
 --
+-- TODO: can get
+--    "scale by zero!  Halp!"
+--  run-time errors (with PlotPoints at least). Where is this
+--  coming from? (changing the fpts filter below to (>0) does not
+--  help (and zero should be a valid radius). I think this may be
+--  a radius issue in plotpoints and maybe such points should be filtered
+--  out there (if true).
+--
 filterPoints :: [Plot Double Double] -> [Plot Double Double]
 filterPoints = filter (not . null . fst . _plot_all_points) . map noNeg
   where
