@@ -9,15 +9,17 @@
 module Graphics.Rendering.Chart.Axis.LocalTime(
     TimeSeq,
     TimeLabelFn,
-    TimeLabelAlignment,
+    TimeLabelAlignment(..),
+    
     timeAxis,
     autoTimeAxis,
+    
     days, months, years,
-    
+                  
     -- * Utilities
-    
     doubleFromLocalTime
-) where
+    
+    ) where
  
 import Data.Default.Class
 import Data.Time
@@ -162,7 +164,7 @@ secondSeq step t = (iterate rev t1, tail (iterate fwd t1))
 
 millis1, millis10, millis100, seconds, fiveSeconds  :: TimeSeq
 millis1 = secondSeq (1 / 1000)
-millis10 = secondSeq ( 1 / 100)
+millis10 = secondSeq (1 / 100)
 millis100 = secondSeq (1 / 10)
 seconds = secondSeq 1
 fiveSeconds = secondSeq 5
@@ -174,8 +176,7 @@ minuteSeq step t = (iterate rev t1, tail (iterate fwd t1))
         t0       = LocalTime (localDay t) (TimeOfDay h0 m0 0)
         t1       = if t0 < t then t0 else rev t0
         rev      = addTod 0 (negate step) 0
-        fwd      = addTod 0 step          0
-
+        fwd      = addTod 0 step 0
 
 minutes, fiveMinutes :: TimeSeq
 minutes = minuteSeq 1
@@ -276,4 +277,5 @@ autoTimeAxis pts
     t1    = maximum pts
     t0    = minimum pts
     ft    = formatTime defaultTimeLocale
+
 

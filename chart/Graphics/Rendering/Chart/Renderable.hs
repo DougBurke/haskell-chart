@@ -14,7 +14,6 @@ module Graphics.Rendering.Chart.Renderable(
     Renderable(..),
     ToRenderable(..),
     PickFn,
-    
     Rectangle(..),
     RectCornerStyle(..),
     
@@ -150,35 +149,41 @@ label :: FontStyle -> HTextAnchor -> VTextAnchor -> String -> Renderable String
 label fs hta vta = rlabel fs hta vta 0
 
 -- | Construct a renderable from a text string, rotated wrt to axes. The angle
---   of rotation is in degrees.
+--   of rotation is in degrees, measured clockwise from the horizontal.
 rlabel :: FontStyle -> HTextAnchor -> VTextAnchor -> Double -> String -> Renderable String
 rlabel fs hta vta rot s = Renderable { minsize = mf, render = rf }
   where
     mf = withFontStyle fs $ do
        ts <- textSize s
-       let (w,h) = (textSizeWidth ts, textSizeHeight ts)
-       return (w*acr+h*asr,w*asr+h*acr)
+       let sz = (textSizeWidth ts, textSizeHeight ts)
+       return (xwid sz, ywid sz)
+       
     rf (w0,h0) = withFontStyle fs $ do
       ts <- textSize s
       let sz@(w,h) = (textSizeWidth ts, textSizeHeight ts)
-      let descent = textSizeDescent ts
+          descent = textSizeDescent ts
+          
+          xadj HTA_Left   = xwid sz/2
+          xadj HTA_Centre = w0/2
+          xadj HTA_Right  = w0 - xwid sz/2
+    
+          yadj VTA_Top      = ywid sz/2
+          yadj VTA_Centre   = h0/2
+          yadj VTA_Bottom   = h0 - ywid sz/2
+          yadj VTA_BaseLine = h0 - ywid sz/2 + descent*acr
+
       withTranslation (Point 0 (-descent)) $ 
-        withTranslation (Point (xadj sz hta 0 w0) (yadj sz vta 0 h0)) $ 
+        withTranslation (Point (xadj hta) (yadj vta)) $ 
           withRotation rot' $ do
             drawText (Point (-w/2) (h/2)) s
             return (\_-> Just s)  -- PickFn String
-    xadj (w,h) HTA_Left   x1 _  =  x1 +(w*acr+h*asr)/2
-    xadj _     HTA_Centre x1 x2 = (x1 + x2)/2
-    xadj (w,h) HTA_Right  _  x2 =  x2 -(w*acr+h*asr)/2
-    
-    yadj (w,h) VTA_Top      y1 _  =  y1 +(w*asr+h*acr)/2
-    yadj _     VTA_Centre   y1 y2 = (y1+y2)/2
-    yadj (w,h) VTA_Bottom   _  y2 =  y2 - (w*asr+h*acr)/2
-    yadj _     VTA_BaseLine _  _  =  0 -- TODO: is this correct?
-
+            
     rot'      = rot / 180 * pi
     (cr,sr)   = (cos rot', sin rot')
     (acr,asr) = (abs cr, abs sr)
+
+    xwid (w,h) = w*acr + h*asr
+    ywid (w,h) = w*asr + h*acr
 
 ----------------------------------------------------------------------
 -- Rectangles

@@ -42,7 +42,7 @@ autoIndexAxis labels vs = AxisData {
     _axis_tropweiv = invport,
     _axis_ticks    = [],
     _axis_labels   = [filter (\(i,_) -> i >= imin && i <= imax)
-                            (zip [0..] labels)], -- why the zip as do not use the labels?
+                            (zip [0..] labels)],
     _axis_grid     = []
     }
   where
