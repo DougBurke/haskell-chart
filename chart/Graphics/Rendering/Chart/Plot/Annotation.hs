@@ -33,7 +33,7 @@ data PlotAnnotation  x y = PlotAnnotation {
       _plot_annotation_hanchor :: HTextAnchor,
       _plot_annotation_vanchor :: VTextAnchor,
       _plot_annotation_angle   :: Double,
-      -- ^ Angle in degrees to rotate the annotation about the anchor point.
+      -- ^ Angle, in degrees, to rotate the annotation about the anchor point.
       _plot_annotation_style   :: FontStyle,
       _plot_annotation_values  :: [(x,y,String)]
 }

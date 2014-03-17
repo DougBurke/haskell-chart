@@ -102,12 +102,13 @@ renderSpotLegend :: AreaSpots z x y -> Rect -> ChartBackend ()
 renderSpotLegend p (Rect p1 p2) = do
     let radius = min (abs (p_y p1 - p_y p2)) (abs (p_x p1 - p_x p2))
         centre = linearInterpolate p1 p2
-        s1 = filledCircles radius $
-             _area_spots_fillcolour p `withOpacity` _area_spots_opacity p
-        s2 = hollowCircles radius
-             (_area_spots_linethick p) (_area_spots_linecolour p)
-    mapM_ (`drawPoint` centre) [s1, s2]
-      
+        psSpot = filledCircles radius $ withOpacity 
+                                        (_area_spots_fillcolour p)
+                                        (_area_spots_opacity p)
+        psOutline = hollowCircles radius (_area_spots_linethick p)
+                                         (_area_spots_linecolour p)
+    drawPoint psSpot centre
+    drawPoint psOutline centre
   where
     linearInterpolate (Point x0 y0) (Point x1 y1) =
         Point (x0 + abs(x1-x0)/2) (y0 + abs(y1-y0)/2)
@@ -186,12 +187,12 @@ renderSpotLegend4D p (Rect p1 p2) = do
     let radius = min (abs (p_y p1 - p_y p2)) (abs (p_x p1 - p_x p2))
         centre = linearInterpolate p1 p2
         palCol = head $ _area_spots_4d_palette p
-        s1 = filledCircles radius $
-             palCol `withOpacity` _area_spots_4d_opacity p
-        s2 = hollowCircles radius
-             (_area_spots_4d_linethick p) (opaque palCol)
-    mapM_ (`drawPoint` centre) [s1, s2]
-      
+        psSpot = filledCircles radius $ withOpacity palCol
+                                        (_area_spots_4d_opacity p)
+        psOutline = hollowCircles radius (_area_spots_4d_linethick p)
+                                         (opaque palCol)
+    drawPoint psSpot centre
+    drawPoint psOutline centre
   where
     linearInterpolate (Point x0 y0) (Point x1 y1) =
         Point (x0 + abs(x1-x0)/2) (y0 + abs(y1-y0)/2)

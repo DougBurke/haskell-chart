@@ -108,13 +108,14 @@ drawErrBar0 ps (ErrPoint (ErrValue xl x xh) (ErrValue yl y yh)) = do
 
 renderPlotLegendErrBars :: PlotErrBars x y -> Rect -> ChartBackend ()
 renderPlotLegendErrBars p (Rect p1 p2) = do
-    drawErrBar (symErrPoint (p_x p1)              ((p_y p1 + p_y p2)/2) dx dx)
-    drawErrBar (symErrPoint ((p_x p1 + p_x p2)/2) ((p_y p1 + p_y p2)/2) dx dx)
-    drawErrBar (symErrPoint (p_x p2)              ((p_y p1 + p_y p2)/2) dx dx)
+    drawErrBar (symErrPoint (p_x p1)              y dx dx)
+    drawErrBar (symErrPoint ((p_x p1 + p_x p2)/2) y dx dx)
+    drawErrBar (symErrPoint (p_x p2)              y dx dx)
 
   where
     drawErrBar = drawErrBar0 p
     dx         = min ((p_x p2 - p_x p1)/6) ((p_y p2 - p_y p1)/2)
+    y          = (p_y p1 + p_y p2)/2
 
 {-# DEPRECATED defaultPlotErrBars "Use the according Data.Default instance!" #-}
 defaultPlotErrBars :: PlotErrBars x y

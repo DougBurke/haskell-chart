@@ -185,7 +185,7 @@ minsizeAxis (AxisT at as _ ad) = do
         tickVis  = _axis_show_ticks  $ _axis_visibility ad
         labels = if labelVis then labelTexts ad else []
         ticks = if tickVis then _axis_ticks ad else []
-    labelSizes <- withFontStyle (_axis_label_style as) $ 
+    labelSizes <- withFontStyle (_axis_label_style as) $
                     mapM (mapM textDimension) labels
 
     let ag      = _axis_label_gap as
@@ -212,7 +212,7 @@ labelTexts ad = map (map snd) (_axis_labels ad)
 axisOverhang :: (Ord x) => AxisT x -> ChartBackend (Double,Double)
 axisOverhang (AxisT at as _ ad) = do
     let labels = map snd . sort . concat . _axis_labels $ ad
-    labelSizes <- withFontStyle (_axis_label_style as) $ 
+    labelSizes <- withFontStyle (_axis_label_style as) $
       mapM textDimension labels
     case labelSizes of
       []  -> return (0,0)
@@ -230,7 +230,7 @@ renderAxis :: AxisT x -> RectSize -> ChartBackend (PickFn x)
 renderAxis at@(AxisT et as _ ad) sz = do
   let ls = _axis_line_style as
       vis = _axis_visibility ad
-  when (_axis_show_line vis) $  
+  when (_axis_show_line vis) $ 
     withLineStyle (ls {_line_cap = LineCapSquare}) $ do
       p <- alignStrokePoints [Point sx sy,Point ex ey]
       strokePointPath p

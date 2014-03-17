@@ -159,7 +159,7 @@ weights sw (Overlay t1 t2 sz) = Overlay (weights sw t1) (weights sw t2) sz
 -- than ./. and .//.
 
 instance Functor Grid where
-    fmap f (Value (a,spn,ew)) = Value   (f a,spn,ew)
+    fmap f (Value (a,spn,ew))  = Value   (f a,spn,ew)
     fmap f (Above t1 t2 s)     = Above   (fmap f t1) (fmap f t2) s
     fmap f (Beside t1 t2 s)    = Beside  (fmap f t1) (fmap f t2) s
     fmap f (Overlay t1 t2 s)   = Overlay (fmap f t1) (fmap f t2) s

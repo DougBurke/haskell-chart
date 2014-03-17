@@ -46,10 +46,10 @@ instance ToPlot PlotFillBetween where
 
 renderPlotFillBetween :: PlotFillBetween x y -> PointMapFn x y -> ChartBackend ()
 renderPlotFillBetween p =
-    renderPlotFillBetween' p (_plot_fillbetween_values p) 
+    renderPlotFillBetween' p (_plot_fillbetween_values p)
 
 renderPlotFillBetween' :: 
-  PlotFillBetween x y
+  PlotFillBetween x y 
   -> [(a, (b, b))]
   -> ((Limit a, Limit b) -> Point)
   -> ChartBackend ()

@@ -1,7 +1,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Graphics.Rendering.Chart.Axis.Floating
--- Copyright   :  (c) Tim Docker 2010
+-- Copyright   :  (c) Tim Docker 2010, 2014
 -- License     :  BSD-style (see chart/COPYRIGHT)
 --
 -- Calculate and render floating value axes
@@ -38,6 +38,9 @@ import Control.Lens
 import Graphics.Rendering.Chart.Utils (isValidNumber)
 import Graphics.Rendering.Chart.Axis.Types
 import Graphics.Rendering.Chart.Axis.Internal (logTicks, showD, steps)
+
+-- Note: the following code uses explicit Integer types
+-- to avoid -Wall 'defaulting to Integer' messages.
 
 instance PlotValue Double where
     toValue  = id
@@ -94,14 +97,14 @@ instance (Show a, RealFloat a) => Default (LinearAxisParams a) where
 
 -- | Generate a linear axis with the specified bounds
 scaledAxis :: RealFloat a => LinearAxisParams a -> (a,a) -> AxisFn a
-scaledAxis lap (min,max) ps0 = makeAxis' realToFrac realToFrac
+scaledAxis lap rs@(minV,maxV) ps0 = makeAxis' realToFrac realToFrac
                                          (_la_labelf lap) (labelvs,tickvs,gridvs)
   where
     ps        = filter isValidNumber ps0
     range []  = (0,1)
-    range _   | min == max = if min==0 then (-1,1) else
-                             let d = abs (min * 0.01) in (min-d,max+d)
-              | otherwise  = (min,max)
+    range _   | minV == maxV = if minV==0 then (-1,1) else
+                               let d = abs (minV * 0.01) in (minV-d,maxV+d)
+              | otherwise    = rs
     labelvs   = map fromRational $ steps (fromIntegral (_la_nLabels lap)) r
     tickvs    = map fromRational $ steps (fromIntegral (_la_nTicks lap))
                                          (minimum labelvs,maximum labelvs)
@@ -111,9 +114,9 @@ scaledAxis lap (min,max) ps0 = makeAxis' realToFrac realToFrac
 -- | Generate a linear axis automatically, scaled appropriately for the
 -- input data.
 autoScaledAxis :: RealFloat a => LinearAxisParams a -> AxisFn a
-autoScaledAxis lap ps0 = scaledAxis lap (min,max) ps0
+autoScaledAxis lap ps0 = scaledAxis lap rs ps0
   where
-    (min,max) = (minimum ps0,maximum ps0)
+    rs = (minimum ps0,maximum ps0)
 
 -- | Given a target number of values, and a list of input points,
 --   find evenly spaced values from the set {1*X, 2*X, 2.5*X, 5*X} (where
@@ -122,9 +125,9 @@ autoSteps :: Int -> [Double] -> [Double]
 autoSteps nSteps vs = map fromRational $ steps (fromIntegral nSteps) r
   where
     range []  = (0,1)
-    range _   | min == max = (min-0.5,min+0.5)
-              | otherwise  = (min,max)
-    (min,max) = (minimum ps,maximum ps)
+    range _   | minV == maxV = (minV-0.5,minV+0.5)
+              | otherwise    = rs
+    rs@(minV,maxV) = (minimum ps,maximum ps)
     ps        = filter isValidNumber vs
     r         = range ps
 
@@ -147,11 +150,11 @@ autoScaledLogAxis lap ps0 =
               (_loga_labelf lap) (wrap rlabelvs, wrap rtickvs, wrap rgridvs)
         where
           ps        = filter (\x -> isValidNumber x && 0 < x) ps0
-          (min,max) = (minimum ps,maximum ps)
+          (minV,maxV) = (minimum ps,maximum ps)
           wrap      = map fromRational
           range []  = (3,30)
-          range _   | min == max = (realToFrac $ min/3, realToFrac $ max*3)
-                    | otherwise  = (realToFrac $ min,   realToFrac $ max)
+          range _   | minV == maxV = (realToFrac $ minV/3, realToFrac $ maxV*3)
+                    | otherwise    = (realToFrac $ minV,   realToFrac $ maxV)
           (rlabelvs, rtickvs, rgridvs) = logTicks (range ps)
 
 

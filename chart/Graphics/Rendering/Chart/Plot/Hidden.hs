@@ -11,7 +11,7 @@
 
 module Graphics.Rendering.Chart.Plot.Hidden(
     PlotHidden(..),
-
+    
     plot_hidden_x_values,
     plot_hidden_y_values
 ) where
@@ -19,8 +19,8 @@ module Graphics.Rendering.Chart.Plot.Hidden(
 import Control.Lens
 import Graphics.Rendering.Chart.Plot.Types
 
--- | Value defining some hidden x and y values. The values don't
---   get displayed, but still affect axis scaling.
+-- | Value defining some hidden x and y values. The values are
+--   not displayed, but they still affect axis scaling.
 data PlotHidden x y = PlotHidden {
     _plot_hidden_x_values :: [x],
     _plot_hidden_y_values :: [y]

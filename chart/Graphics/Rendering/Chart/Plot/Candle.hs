@@ -76,7 +76,7 @@ instance ToPlot PlotCandle where
         pts = _plot_candle_values p
 
 renderPlotCandle :: PlotCandle x y -> PointMapFn x y -> ChartBackend ()
-renderPlotCandle p pmap =
+renderPlotCandle p pmap = 
     mapM_ (drawCandle p . candlemap) (_plot_candle_values p)
   where
     candlemap (Candle x lo op mid cl hi) =

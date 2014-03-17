@@ -1,7 +1,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Graphics.Rendering.Chart.Plot.Pie
--- Copyright   :  (c) Tim Docker 2008
+-- Copyright   :  (c) Tim Docker 2008, 2014
 -- License     :  BSD-style (see chart/COPYRIGHT)
 --
 -- A  basic pie chart.
@@ -48,7 +48,9 @@ module Graphics.Rendering.Chart.Plot.Pie(
 ) where
 -- original code thanks to Neal Alexander
 
-import Control.Lens hiding (moveTo)
+-- see ../Drawing.hs for why we do not use hiding (moveTo) for
+-- lens < 4
+import Control.Lens
 import Data.Colour
 import Data.Colour.Names (white)
 import Data.Monoid
@@ -156,8 +158,9 @@ minsizePie p = do
 renderPie :: PieChart -> (Double, Double) -> ChartBackend (PickFn a)
 renderPie p (w,h) = do
     (extraw,extrah) <- extraSpace p
-    -- let (w,h)  = (p_x p2 - p_x p1, p_y p2 - p_y p1) -- by construction this is the input (w,h)
+    -- let (w,h)  = (p_x p2 - p_x p1, p_y p2 - p_y p1)
     -- let center = Point (p_x p1 + w/2)  (p_y p1 + h/2)
+    --
     let center = Point (w/2) (h/2)
     let radius = min (w - 2*extraw) (h - 2*extrah) / 2
 
@@ -166,7 +169,7 @@ renderPie p (w,h) = do
     return nullPickFn
  
     where
-        -- p1 = Point 0 0  (p1/p2 used in pieLabel and not really needed here)
+        -- p1 = Point 0 0 
         -- p2 = Point w h 
         content = let total = sum (map _pitem_value (_pie_data p))
                   in [ pitem{_pitem_value=_pitem_value pitem/total}
@@ -211,7 +214,7 @@ renderPie p (w,h) = do
                             <> lineTo' x y
                             <> close
 
-                    withFillStyle (FillStyleSolid pColor) $
+                    withFillStyle (FillStyleSolid pColor) $ 
                       fillPath path
                     withLineStyle (def { _line_color = withOpacity white 0.1 }) $ 
                       strokePath path
@@ -223,12 +226,13 @@ renderPie p (w,h) = do
                     y'   = y + (sin' * x'')
                     cos' = (cos . radian) angle
                     sin' = (sin . radian) angle
-                    x''  = (x + r) - x -- QUS: is this to try and avoid numerical errors?
+                    -- TODO: is x'' defined in this way to try and avoid
+                    --       numerical rounding?
+                    x''  = (x + r) - x
                     x    = p_x center
                     y    = p_y center
 
                 radian = (*(pi / 180.0))
-
 
 label_rgap, label_rlength :: Double
 label_rgap = 5

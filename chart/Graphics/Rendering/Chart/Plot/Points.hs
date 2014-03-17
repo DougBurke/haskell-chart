@@ -52,12 +52,13 @@ renderPlotPoints p pmap =
 
 renderPlotLegendPoints :: PlotPoints x y -> Rect -> ChartBackend ()
 renderPlotLegendPoints p (Rect p1 p2) = do
-    drawPoint ps (Point (p_x p1)              ((p_y p1 + p_y p2)/2))
-    drawPoint ps (Point ((p_x p1 + p_x p2)/2) ((p_y p1 + p_y p2)/2))
-    drawPoint ps (Point (p_x p2)              ((p_y p1 + p_y p2)/2))
+    drawPoint ps (Point (p_x p1)              y)
+    drawPoint ps (Point ((p_x p1 + p_x p2)/2) y)
+    drawPoint ps (Point (p_x p2)              y)
 
   where
     ps = _plot_points_style p
+    y = (p_y p1 + p_y p2)/2
 
 {-# DEPRECATED defaultPlotPoints  "Use the according Data.Default instance!" #-}
 defaultPlotPoints :: PlotPoints x y
