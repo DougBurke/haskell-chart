@@ -45,7 +45,7 @@ import Graphics.Rendering.Chart.Axis.Internal (logTicks, showD, steps)
 instance PlotValue Double where
     toValue  = id
     fromValue= id
-    autoAxis = autoScaledAxis defaultLinearAxis
+    autoAxis = autoScaledAxis def
 
 -- | A wrapper class for doubles used to indicate they are to
 -- be plotted against a percentage axis.
@@ -58,7 +58,7 @@ instance Show Percent where
 instance PlotValue Percent where
     toValue  = unPercent
     fromValue= Percent
-    autoAxis = autoScaledAxis defaultLinearAxis{-_la_labelf=-}
+    autoAxis = autoScaledAxis def
 
 -- | A wrapper class for doubles used to indicate they are to
 -- be plotted against a log axis.
