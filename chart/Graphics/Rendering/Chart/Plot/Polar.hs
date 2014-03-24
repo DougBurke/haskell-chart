@@ -1,3 +1,8 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables #-} -- only needed to hide a defaulting warning
+{-# LANGUAGE MultiParamTypeClasses #-} -- for PolarPlotValue
+
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Graphics.Rendering.Chart.Plot.Polar
@@ -16,9 +21,6 @@
 -- Earth (<http://www.progonos.com/furuti/MapProj/Normal/TOC/cartTOC.html>).
 --
 -----------------------------------------------------------------------------
-
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE ScopedTypeVariables #-} -- only needed to hide a defaulting warning
 
 -- The following is based on the Pie plot, but I would really want the
 -- axis code separated out to support more generic non-Cartesian
@@ -40,14 +42,22 @@ module Graphics.Rendering.Chart.Plot.Polar(
   -- * Symbols
   
   PolarLayout(..)
-  , PolarAxes(..)
+  , PolarLayoutAxes(..)
+  , PolarAxesData(..)
+  , PolarPlotValue(..)    
+  , Radians(..)
+  , Degrees(..)
+  , ScaleRadialAxis
+  , ScaleThetaAxis
     
   -- * Rendering  
     
   , polarLayoutToRenderable
     
   -- * Utility routines for creating and displaying axes
-    
+  --    
+  -- | These may be removed.  
+  , autoScaledAxes
   , showThetaLabelDegrees
   , showThetaLabelRadians
     
@@ -62,21 +72,32 @@ module Graphics.Rendering.Chart.Plot.Polar(
   , polarlayout_legend
   , polarlayout_margin
     
-  , polar_radial_axis_offset
-  , polar_theta_axis_zero
-  , polar_theta_axis_nticks
-  , polar_theta_axis_margin
-  , polar_theta_axis_reverse
-  , polar_radial_axis_show
-  , polar_theta_axis_show
+  -- , polar_radial_axis_offset
+  -- , polar_theta_axis_nticks
+  -- , polar_theta_axis_margin
+  -- , polar_theta_axis_reverse
   , polar_grid_style
   , polar_theta_axis_style
   , polar_radial_axis_style
   , polar_axes_label_style
+  , polar_axes_filter_plots    
+  , polar_axes_generate
     
+  , polaraxes_viewport
+  , polaraxes_r_range
+  , polaraxes_theta_zero
+  , polaraxes_r_visibility
+  , polaraxes_r_ticks
+  , polaraxes_r_labels
+  , polaraxes_r_grid
+  , polaraxes_t_visibility
+  , polaraxes_t_ticks
+  , polaraxes_t_labels
+  , polaraxes_t_grid
   )
        where
 
+import Control.Arrow ((***))
 import Control.Monad (forM_)
 import Control.Lens
 
@@ -88,6 +109,8 @@ import Data.Default.Class
 import Data.Char (chr)
 
 import Graphics.Rendering.Chart.Axis.Internal (scaleLinear, showD)
+-- import Graphics.Rendering.Chart.Axis (AxisStyle(..), AxisVisibility(..), PlotValue(..))
+import Graphics.Rendering.Chart.Axis (AxisVisibility(..), PlotValue(..), autoScaledAxis)
 import Graphics.Rendering.Chart.Backend.Types
 import Graphics.Rendering.Chart.Drawing
 import Graphics.Rendering.Chart.Geometry
@@ -97,13 +120,27 @@ import Graphics.Rendering.Chart.Plot.Types
 import Graphics.Rendering.Chart.Renderable
 import Graphics.Rendering.Chart.Utils (maximum0)
 
+{-
+NOTES:
+
+In the middle of converting the code to an approach closer to the cartesian case
+used by Layout/Axis/Plot. It is not immediately clear how close a match we can
+get.
+
+At present there is no analog of the AxisT record, and much of the information
+about tick marks and grid location is hard coded (this is a loss compared
+to the code prior to this rework).
+
+-}
+
 -- | A polar plot of @(r,&#x03b8;)@ values.
 --    
 --   /TODO:/
 --
---    - Calculate the spacing for the &#x03b8; labels rather than hard coding them
+--    - A lot of the customization present in earlier versions has
+--      been removed (or lost) in this version.
 -- 
-data PolarLayout = PolarLayout 
+data PolarLayout r t = PolarLayout 
   { _polarlayout_background      :: FillStyle
     -- ^ How to fill the rectangle.
     
@@ -118,12 +155,11 @@ data PolarLayout = PolarLayout
   , _polarlayout_title_style     :: FontStyle
     -- ^ Font style to use for the title.
 
-  , _polarlayout_axes            :: PolarAxes
+  , _polarlayout_axes            :: PolarLayoutAxes r t
     -- ^ Axes for the layout.
     
-  , _polarlayout_plots           :: [Plot Double Double]
-    -- ^ The data to plot. It is not guaranteed that all plot types will
-    --   display well!
+  , _polarlayout_plots           :: [Plot r t]
+    -- ^ The data to plot.
 
   , _polarlayout_legend          :: Maybe LegendStyle
     -- ^ Style the legend area
@@ -134,15 +170,18 @@ data PolarLayout = PolarLayout
 
 -- | Configuration of the axes of the polar plot.
 --
-data PolarAxes = 
-  PolarAxes 
-  { _polar_radial_axis_offset :: Double
-    -- ^ The offset, in radians, from the location of the
+--   /TODO:/
+--
+--    - this is in a state of flux and is liable to change
+--
+data PolarLayoutAxes r t = 
+  PolarLayoutAxes 
+{-  
+  { _polar_radial_axis_offset :: t
+    -- ^ The offset from the location of the
     --   @&#x03b8;=0@ axis at which to label the radial axis.
-    --   The default is @&#x03c0;/8@.
-  , _polar_theta_axis_zero :: Double
-    -- ^ Angle, in radians, measured counter-/anti- clockwise from the horizontal,
-    --   to use for @&#x03b8;=0@. The default is @0@.
+    --
+    --   CURRENTLY UNUSED.
   , _polar_theta_axis_nticks :: Int
     -- ^ The number of tick marks on the theta axis; the default is 8 which gives
     --   a spacing of 45 degrees. The value is assumed to be greater than 1.
@@ -152,16 +191,9 @@ data PolarAxes =
   , _polar_theta_axis_reverse :: Bool
     -- ^ Set to @True@ to have the angles be measured clockwise; the
     --   default is @False@.
-  , _polar_radial_axis_show :: Double -> String
-    -- ^ Create a label for the radial axis. The default is based on `show` but
-    --   drops the @.0@ suffix if present.
-  , _polar_theta_axis_show :: Int -> Int -> String
-    -- ^ Create a label for the theta axis. Unlike the radial axis the
-    --   arguments are the maximum number of ticks (the
-    --   @_polar_theta_axis_nticks@ value) and the current tick number
-    --   (@0@ to @nticks-1@).
-    --
-  , _polar_grid_style :: LineStyle
+  , 
+-}
+  { _polar_grid_style :: LineStyle
     -- ^ The color and style used to draw the grid lines. The default is
     --   a dashed, light gray, line.
   , _polar_theta_axis_style :: LineStyle
@@ -172,28 +204,35 @@ data PolarAxes =
     --   The default is for there to be no line.
   , _polar_axes_label_style :: FontStyle
     -- ^ The font used to draw the axis labels (both radius and @&#x03b8;@).
+  
+  , _polar_axes_filter_plots :: [Plot r t] -> [Plot r t]
+    -- ^ Filter out data points and, if the resulting plot is empty,
+    --   plots.
+    
+  , _polar_axes_generate :: ([r],[t]) -> PolarAxesData r t
+    -- The Layout/Axis version has _generate be :: AxisFn x which is [x] -> AxisData x
+    -- and AxisT x = AxisT RectEdge AxisStyle Bool (AxisData x)
+    -- and AxisData contains mapping/ticks/grid info
   }
 
--- | Radius and &#x03b8; (in radians, measured anti-/counter- clockwise from the
---   X axis). Points with a negative radius are excluded from the plot.
-type PolarCoord = (Double, Double)
-
-instance Default PolarAxes where
-  def = PolarAxes
+instance (PolarPlotValue r t, Num r, Ord r) => Default (PolarLayoutAxes r t) where
+  def = PolarLayoutAxes
+  {-
     { _polar_radial_axis_offset = d2r (45.0/2)
-    , _polar_theta_axis_zero = 0
     , _polar_theta_axis_nticks = 8
     , _polar_theta_axis_margin = 10
     , _polar_theta_axis_reverse = False
-    , _polar_radial_axis_show = showD
-    , _polar_theta_axis_show = showThetaLabelDegrees
-    , _polar_grid_style = dashedLine 1 [2,4] $ opaque lightgrey
+  -}
+    { _polar_grid_style = dashedLine 1 [2,4] $ opaque lightgrey
     , _polar_theta_axis_style = solidLine 1 $ opaque black
     , _polar_radial_axis_style = solidLine 0 transparent 
     , _polar_axes_label_style = def
+                                
+    , _polar_axes_filter_plots = filterPlots                                
+    , _polar_axes_generate = autoPolarAxes
     }
   
-instance Default PolarLayout where
+instance (PolarPlotValue r t, Num r, Ord r) => Default (PolarLayout r t) where
   def = PolarLayout 
         { _polarlayout_background = solidFillStyle $ opaque white
         , _polarlayout_plot_background = Nothing
@@ -207,21 +246,268 @@ instance Default PolarLayout where
         , _polarlayout_margin          = 0
         }
 
-data Axes2T r t = Axes2T {
-  _axisnct_conv :: (r, t) -> (Double, Double)
+-- | What types can be plotted as a pair of polar (r,theta) 
+--   coordinates.
+--  
+class (PlotValue r, PlotValue t) => (PolarPlotValue r t) where
+  autoPolarAxes :: ([r],[t]) -> PolarAxesData r t
+
+{-
+-- The following requires FlexibleInstances and (I would assume,
+-- OverlappingInstances), so manually create the instances
+instance (RealFloat r, RealFloat t) => PolarPlotValue r t where
+  autoPolarAxes = autoScaledAxes scaleLinear scaleTheta 0 False
+-}
+  
+-- | The theta values are in radians, measured anti-/counter-  
+--   clockwise from the horizontal. The angles are labelled 
+--   in degrees.  
+instance PolarPlotValue Double Double where
+  autoPolarAxes = autoScaledAxes scaleLinear 
+                  (scaleTheta showThetaLabelDegrees) 0 False
+
+-- | The angles are labelled in radians (as units of &#x03c0;).
+instance PolarPlotValue Double Radians where
+  autoPolarAxes = autoScaledAxes scaleLinear 
+                  (scaleTheta showThetaLabelRadians) 0 False
+
+-- | The angles are labelled in degrees.
+instance PolarPlotValue Double Degrees where
+  autoPolarAxes = autoScaledAxes scaleLinear 
+                  (scaleTheta showThetaLabelDegrees) 0 False
+
+type ScaleRadialAxis a =   
+  (Int,Int) -> (a,a) -> [a] -> ([a], [a], [a])
+  
+type ScaleThetaAxis a = 
+  [a] -> ([a], [(a,String)], [a])
+
+{-
+TODO: 
+
+Can the "angle at which theta= is to be drawn" be handled by a
+rotation before drawing (since this then means that it can be
+specified later, rather than here). This requires a translation to the
+center too.
+
+In fact, would this be a sensible approach; i.e. translate to the
+origin and make all positions relative to that?
+
+-}
+
+-- | Create grid marks for the theta axis. This uses labels in
+--   degrees for the whole range (0 to 360) measured anti-/counter-
+--   clockwise from the horizontal.
+--
+--   /TODO:/
+--
+--      - can this be made user configureable?
+--
+--      - should this include the margin offset; i.e. return
+--        (r,t,String) for the labels
+--
+scaleTheta :: 
+  RealFloat t
+  => (Int -> Int -> String)
+  -> [t] 
+  -> ([t], [(t,String)], [t])
+  -- ^ (ticks, labels, grids)
+scaleTheta showLabel _ = 
+  let nticks = 8 -- TODO: configurable?
+      tindex = [0..nticks-1]
+      tstep = 360 / fromIntegral nticks
+      gridvs = map (\i -> d2r tstep * fromIntegral i) tindex
+      labelvs = zip gridvs $ map (showLabel nticks) tindex
+      tickvs = gridvs
+
+  in (tickvs, labelvs, gridvs)
+
+autoScaledAxes :: 
+  (RealFloat r, RealFloat t)
+  => ScaleRadialAxis r
+  -> ScaleThetaAxis t
+  -> t
+  -- ^ Angle (in radians, measued counter-clockwise from the X axis)
+  --   at which the theta=0 axis is to be drawn
+  -> Bool 
+  -- ^ Is the theta axis reversed?
+  -> ([r],[t])
+  -- ^ (r,theta) values
+  -> PolarAxesData r t
+autoScaledAxes scaleR scaleT tZero tRev (rs,ts) = 
+  let rMin = 0 -- TODO: allow rmin /= 0
+      
+      rMaxTmp = maximum0 rs
+      rMax = case rtickvs of
+        [] -> rMaxTmp
+        _ -> maximum rtickvs
+            
+      -- try and remove "problem" positions/values
+      f0 = filter (>0)
+      g (xs, ys, zs) = (f0 xs, f0 ys, f0 zs)
+      (rtickvs, rlabelvs, rgridvs) = g $ scaleR (5, 5) (0, rMaxTmp) rs
+
+      -- SHOULD this filtering be applied to all the outputs of scaleR?
+      --
+      -- we do not want grid lines at r=rmin and r=rmax
+      frgridvs = filter (\r -> r > rMin && r < rMax) rgridvs
+
+      -- scale from the user theta value (in radians) to the on-screen value
+      getTheta theta = tZero + if tRev then (-theta) else theta
+  
+      -- can we use _polar_radial_axis_offset (or move this info
+      -- around so we can use it)?
+      rAngle = d2r (45.0/2)
+
+      (ttickvs, tlabelvs, tgridvs) = scaleT ts
+
+      coordConv (w,h) radius (r,theta) = 
+        let rr = realToFrac r * radius / realToFrac rMax
+            theta' = realToFrac $ getTheta theta
+        in ( w/2 + rr * cos theta'
+           , h/2 - rr * sin theta' ) 
+      
+  in PolarAxesData {
+    _polaraxes_viewport = coordConv
+    -- , _polaraxes_tropweiv = undefined
+                            
+    , _polaraxes_r_range = (rMin, rMax)
+    , _polaraxes_theta_zero = tZero
+    , _polaraxes_r_visibility = def
+    , _polaraxes_r_ticks = rtickvs
+    , _polaraxes_r_labels = zip3 rtickvs (repeat rAngle) $ map showD rlabelvs
+    , _polaraxes_r_grid = frgridvs
+                           
+    , _polaraxes_t_visibility = def
+    , _polaraxes_t_ticks = ttickvs 
+    , _polaraxes_t_labels = tlabelvs
+    , _polaraxes_t_grid = tgridvs
+    }
+    
+-- | A value in radians. 
+--
+--   The only reason for this type (at the moment) is to
+--   switch to using radians as the theta axis label.
+--   This seems a bit excessive. Note that there is
+--   currently no support for specialized labelling when
+--   used as a `PlotValue`.
+newtype Radians = Radians { unRadians :: Double }
+    deriving (Eq,Ord,Num,Real,Fractional,RealFrac,Floating,RealFloat)
+
+-- | The show instance just displays the numeric value.
+--
+instance Show Radians where
+  show = show . unRadians
+
+-- | It is not clear yet whether we will try and ensure that
+--   values are kept within the range (0,2&#x03c0;].
+--
+--   At present the value is treated just as a `Double`;
+--   that is, labelling is not in units of &#x03c0; nor
+--   is the range limited to (0,2&#x03c0;].
+--  
+instance PlotValue Radians where
+  toValue   = unRadians
+  fromValue = Radians
+  autoAxis  = autoScaledAxis def
+    
+-- | A value in degrees.
+--
+newtype Degrees = Degrees { unDegrees :: Double }
+    deriving (Eq,Ord,Num,Real,Fractional,RealFrac,Floating,RealFloat)
+
+-- | The show instance just displays the numeric value.
+instance Show Degrees where
+  show = show . unDegrees
+
+-- | It is not clear yet whether we will try and ensure that
+--   values are kept within the range (0,360].
+--
+--   At present the value is treated just as a `Double`;
+--   that is, labelling does not add a degrees symbol nor
+--   is the range limited to (0,360].
+--  
+instance PlotValue Degrees where
+  toValue   = d2r . unDegrees
+  fromValue = Degrees . r2d
+  autoAxis  = autoScaledAxis def
+    
+{-
+
+-- Axis/Types provides makeAxis but not clear what interface should
+-- be here, since coord conversion needs more info  
+  
+-- intended to be equivalent to AxisT
+--
+-- TODO: note theta axis direction/offset here?
+--
+-- CURRENTLY UNUSED
+
+data PolarAxesT r t = 
+  PolarAxesT 
+  { _polaraxest_edges :: RectEdge
+  , _polaraxest_styles :: (AxisStyle,AxisStyle)
+  , _polaraxest_data :: PolarAxesData r t
   }
 
-instance ToRenderable PolarLayout where
-  toRenderable = setPickFn nullPickFn . polarLayoutToRenderable
+-}
+  
+-- intended to be equivalent to AxisData
+--
+-- do viewport/tropweiv need the width/height sent in
+-- or some other scaling information? or is this sent in
+-- when creating this structure - e.g. in autoPolarAxes?
+-- It would seem that RectSize should be known about by
+-- viewport (ie can be hardcoded) rather than re-calculated
+-- each time
+--
+  
+-- | This is intended to be similar to the `AxisData`
+--   type but is somewhat of a grab-bag of functionality
+--   at this time, in part because there is currently no 
+--   equivalent of `AxisT`.  
+--  
+data PolarAxesData r t =
+  PolarAxesData 
+  {
+    -- TODO: should the viewport return Maybe for invalid (r,t) values?
+    _polaraxes_viewport :: RectSize 
+                           -> Double -- maximum radius, in pixel units
+                           -> (r,t) -> (Double, Double)
+                           
+  -- , _polaraxes_tropweiv :: RectSize -> (Double, Double) -> (r,t)
+    
+  , _polaraxes_r_range :: (r,r)  
+    -- ^ The minimum and maximum r shown.
+    
+  , _polaraxes_theta_zero :: t
+    -- ^ Angle, in radians, measured counter-/anti- clockwise from the horizontal,
+    --   to use for @&#x03b8;=0@.
+    
+  , _polaraxes_r_visibility :: AxisVisibility
+    
+  , _polaraxes_r_ticks :: [r]
+  , _polaraxes_r_labels :: [(r, t, String)]
+  , _polaraxes_r_grid :: [r]
+    -- ^ This is assumed not to include the outer radius.
+  
+  , _polaraxes_t_visibility :: AxisVisibility
+    
+  , _polaraxes_t_ticks :: [t]
+  , _polaraxes_t_labels :: [(t, String)]
+  , _polaraxes_t_grid :: [t]
 
--- TODO: the rendering needs a lot of clean up
+  }
+
+instance ToRenderable (PolarLayout r t) where
+  toRenderable = setPickFn nullPickFn . polarLayoutToRenderable
 
 -- | Render the data, axes, and labels.
 --
 --   At present the axes are always drawn first, and then the data.
 --
 polarLayoutToRenderable ::
-  PolarLayout
+  PolarLayout r t
   -> Renderable (PickFn a)
 polarLayoutToRenderable pl =
   fillBackground (_polarlayout_background pl) $ 
@@ -243,29 +529,15 @@ titleToRenderable lm fs s = addMargins (lm/2,0,0,0) (setPickFn nullPickFn title)
   where
     title = label fs HTA_Centre VTA_Centre s
 
--- TODO: this knowledge encoded in conversion routines from specific plot types
---       to a generic polar plot type (e.g. matching PlotPoints x y -> Plot x y)
---
 -- Layout has getLegendItems and renderLegend which I have squashed into one for now
     
-renderLegends :: PolarLayout -> Renderable (PickFn a)
+renderLegends :: PolarLayout r t -> Renderable (PickFn a)
 renderLegends pl =
   let legItems = concatMap _plot_legend $ _polarlayout_plots pl
       
       g = besideN [ tval $ mkLegend (_polarlayout_legend pl) (_polarlayout_margin pl) legItems
                   , weights (1,1) $ tval emptyRenderable ]
   in gridToRenderable g
-
-{- TODO: update Plot.renderPlotLegendPoints ?
-renderPlotLegendPoints :: PlotPoints Double Double -> Rect -> ChartBackend ()
-renderPlotLegendPoints p (Rect p1 p2) =
-  let ymid = ((p_y p1 + p_y p2)/2)
-      ps = _plot_points_style p
-      draw x = drawPoint ps (Point x ymid)
-      x1 = p_x p1
-      x2 = p_x p2
-  in mapM_ draw [x1, (x1+x2)/2, x2]
--}
 
 -- Should this be exported by Layout?
 type LegendItem = (String,Rect -> ChartBackend ())
@@ -280,48 +552,33 @@ mkLegend mls lm vals = case mls of
 
 -- TODO: have to work out extra size here rather than hard code it!
 extraSpace ::
-  PolarLayout
+  PolarLayout r t
   -> ChartBackend (Double, Double)
 extraSpace _ = return (10,10)
 
 minsizePolarLayout ::
-  PolarLayout
+  PolarLayout r t
   -> ChartBackend (Double, Double)
 minsizePolarLayout pl = do
   (extraw, extrah) <- extraSpace pl
   return (extraw * 2, extrah * 2)
 
--- degrees to radians
-d2r :: Double -> Double
-d2r = ((pi/180.0) *) 
+-- unit conversion
+d2r :: RealFloat a => a -> a
+d2r = ((pi/180.0) *)
 
-{-
-getMaxRadii :: 
-  [PlotPoints Double Double] 
-  -> [Double]
-  -- ^ The maximum radii of all the points; this is the radius of the
-  --   point plus the radius of the symbol.
-getMaxRadii = concatMap getRs
-  where
-    getRs :: PlotPoints Double Double -> [Double]
-    getRs pp = map getR $ _plot_points_values pp
-      where
-        rad = _point_radius $ _plot_points_style pp
-        getR = (rad +) . fst
--}
+r2d :: RealFloat a => a -> a
+r2d = ((180.0/pi) *)
 
--- Now ignoring the radius since it is in pixel units
-getMaxRadii ::
-  [Plot Double Double] 
-  -> [Double]
-getMaxRadii = concatMap (fst . _plot_all_points)
+-- d2r :: RealFloat a => a -> Double
+-- d2r a = (pi/180.0) * realToFrac a
 
--- Remove invalid points (at present that means negative radii).
+-- Remove points (and plots) with 'invalid' points in them.
+-- At present, this is just those points with radii < 0.
 --
--- Any empty plots are removed, but it does *not* remove the
--- corresponding item from the legend. This may or may not be
--- a good thing.
---
+-- Note that this does not remove the corresponding legend    
+-- (if all the points turn out to be invalid).
+--    
 -- TODO: can get
 --    "scale by zero!  Halp!"
 --  run-time errors (with PlotPoints at least). Where is this
@@ -330,76 +587,33 @@ getMaxRadii = concatMap (fst . _plot_all_points)
 --  a radius issue in plotpoints and maybe such points should be filtered
 --  out there (if true).
 --
-filterPoints :: [Plot Double Double] -> [Plot Double Double]
-filterPoints = filter (not . null . fst . _plot_all_points) . map noNeg
+filterPlots :: (Num r, Ord r) => [Plot r t] -> [Plot r t]
+filterPlots = filter (not . null . fst . _plot_all_points) . map noNeg
   where
     noNeg pp = 
       let pts = uncurry zip $ _plot_all_points pp
           fpts = filter ((>=0) . fst) pts
       in pp { _plot_all_points = unzip fpts }
 
--- Assumptions:
---    rectangle (0,0) to (w,h)
---    origin of plot at center of the rectangle
---    
 renderPolarLayout :: 
-  PolarLayout
-  -> (Double, Double) 
+  PolarLayout r t
+  -> RectSize
   -> ChartBackend (PickFn a)
-renderPolarLayout pl (w,h) = do
-  (extraw, extrah) <- extraSpace pl
+renderPolarLayout pl sz@(w,h) = do
+  (extraw, extrah) <- minsizePolarLayout pl
   let center_x = w/2
       center_y = h/2
       
       pa = _polarlayout_axes pl
       
-      radius = min (w - 2*extraw) (h - 2*extrah) / 2
+      radius = min (w - extraw) (h - extrah) / 2
       
-      plots = _polarlayout_plots pl
+      allPlots = _polarlayout_plots pl
+      plots = _polar_axes_filter_plots pa allPlots
+      points = (concat *** concat) $ unzip $ map _plot_all_points plots
       
-      allPoints = filterPoints plots
-      rMaxVals = getMaxRadii allPoints
+      adata = _polar_axes_generate pa points
       
-      -- scale data using the max of (r+size);
-      -- actually, this is now scaled by rMax after
-      -- increasing to a "nice" value
-      rMaxTmp = maximum0 rMaxVals
-      rMax = case tickvs of
-        [] -> rMaxTmp
-        _ -> maximum tickvs
-            
-      -- where should the radial axis marks be?
-      -- for now use a linear scale
-      -- TODO: note that if no data, rmin,rmax will be -1, 1 which isn't wanted here.
-      --       but hopefully the filtering > 0 will "fix" this (and also remove 0
-      --       values which can cause problems too)
-      f0 = filter (>0)
-      g (xs, ys, zs) = (f0 xs, f0 ys, f0 zs)
-      (tickvs, labelvs, gridvs) = g $ scaleLinear (5, 5) (0, rMaxTmp) rMaxVals
-
-      -- scale from the user theta value (in radians) to the on-screen value
-      getTheta theta = _polar_theta_axis_zero pa +
-                       if _polar_theta_axis_reverse pa then (-theta) else theta
-  
-      -- scale the user coodinate to the screen coordinates
-      scaleR r = r * radius /rMax
-      coordConv :: PolarCoord -> (Double,Double)
-      coordConv (r,theta) = 
-        let rr = scaleR r
-            theta' = getTheta theta
-        in ( center_x + rr * cos theta'
-           , center_y - rr * sin theta' ) 
-      
-      {-
-      paint :: PointStyle -> PolarCoord -> ChartBackend ()
-      paint pstyle rt = 
-        let px = uncurry Point $ coordConv rt
-            ps = pstyle { _point_radius = scaleR (_point_radius pstyle) }
-        in drawPoint ps px
-      -}  
-      
-      axis = Axes2T coordConv
-           
   case _polarlayout_plot_background pl of
     Nothing -> return ()
     Just fs -> withFillStyle fs $ 
@@ -408,58 +622,50 @@ renderPolarLayout pl (w,h) = do
   
   -- QUS: would it make sense to do the grid/axis within the clip
   --      region too?
-  renderAxesAndGrid pa axis (0,rMax) gridvs labelvs
+  renderAxesAndGrid sz (center_x,center_y) radius pa adata
   withClipRegion (Rect (Point 0 0) (Point w h)) $
-    mapM_ (renderSinglePlot (w,h) (Just axis)) plots
-  {-
-  forM_ allPoints $ \ps ->
-    mapM_ (paint (_plot_points_style ps)) $ _plot_points_values ps
-  -}    
+    mapM_ (renderSinglePlot sz radius (Just adata)) plots
   
   return nullPickFn
 
+-- TODO:
+--   if the radial axis is drawn, then it uses the location of
+--   theta=0 (_polaraxes_theta_zero), but the radial labels are
+--   likely drawn at a different angle. Shouldn't it be drawn
+--   at the same angle as the labels?  
+--  
 renderAxesAndGrid ::
-  PolarAxes
-  -> Axes2T Double Double
-  -- ^ convert from @(r,theta)@ to plot coordinates
-  -> (Double, Double)
-  -- ^ (min,max) values for the radial axis
-  -> [Double]
-  -- ^ grid positions
-  -> [Double]
-  -- ^ label values and positions
+  (Double,Double)
+  -- ^ width,height (display coordinates)
+  -> (Double,Double)
+  -- ^ center (display coordinates)
+  -> Double
+  -- ^ Max radius (display coordinates)
+  -> PolarLayoutAxes r t
+  -> PolarAxesData r t
   -> ChartBackend ()
-renderAxesAndGrid pa axis (rmin,rmax) gridvs labelvs = do
-  let nticks = _polar_theta_axis_nticks pa
-      rAngle = _polar_radial_axis_offset pa
-
-      conv = _axisnct_conv axis
+renderAxesAndGrid sz (cx,cy) radius pa adata = do
+  let conv = _polaraxes_viewport adata sz radius
+      (_, rmax) = _polaraxes_r_range adata
   
-      -- here assuming r=0 is the center
-      (cx,cy) = conv (0,0)
       p0 = Point cx cy
 
-      getR r = let (cx2,cy2) = conv (r,0)
+      getR r = let (cx2,cy2) = conv (r,rAngle)
                in sqrt $ (cx2-cx)*(cx2-cx) + (cy2-cy)*(cy2-cy)
+
       cr = getR rmax
-
-      tindex = [0..nticks-1]
-      tstep = 360 / fromIntegral nticks
-      tangles = map d2r [0, tstep .. (360-tstep)]
-        
-      fgridvs = filter (\r -> r >= rmin && r <= rmax) gridvs 
-
-      rmargin = _polar_theta_axis_margin pa
+      rAngle = _polaraxes_theta_zero adata
+      -- rmargin = _polar_theta_axis_margin pa
     
   -- Draw the grid lines
   withLineStyle (_polar_grid_style pa) $ do
     -- constant r
-    forM_ fgridvs $ \r -> 
+    forM_ (_polaraxes_r_grid adata) $ \r -> 
       let r' = getR r
       in strokePath $ arc' cx cy r' 0 (2*pi)
     
     -- constant theta
-    forM_ tangles $ \theta ->
+    forM_ (_polaraxes_t_grid adata) $ \theta ->
       let p1 = uncurry Point $ conv (rmax,theta)
       in alignStrokePoints [p0, p1] >>= strokePointPath
 
@@ -480,18 +686,24 @@ renderAxesAndGrid pa axis (rmin,rmax) gridvs labelvs = do
     -- TODO: using thetaLabelOffsets isn't quite right here - e.g.
     -- if the axis were horizontal we'd want HTA_Center VTA_Top
     -- rather than HTA_Left VTA_Center but leave as is for now
-    forM_ labelvs $ \r -> 
-      drawTextTheta conv (r,rAngle) $ _polar_radial_axis_show pa r
-    
+    forM_ (_polaraxes_r_labels adata) $ \(r,t,txt) -> 
+      drawTextTheta conv (cx,cy) (r,t) txt 
+   
     -- theta
     --
     -- rmargin is in pixels but need data coordinates for conv,
     -- so scale it
-    let roff = (cr + rmargin) * rmax / cr
+    --
+    -- TODO: need to send this conversion routine in somehow
+    --       to avoid typeclass constraints on the routine,
+    --       or do this scaling elsewhere (should probably be included
+    --       in the calculation of _polaraxes_t_labels)
+    --
+    -- let roff = (cr + rmargin) * rmax / cr
+    let roff = rmax -- error "TODO: need to scale offset somehow"
     
-    forM_ (zip tindex tangles) $ \(ti,theta) -> 
-      let txt = _polar_theta_axis_show pa nticks ti
-      in drawTextTheta conv (roff,theta) txt
+    forM_ (_polaraxes_t_labels adata) $ \(theta,txt) -> 
+      drawTextTheta conv (cx,cy) (roff,theta) txt
 
 -- Represent label positions about the polar plot by what "zone" they are
 -- in. The zone is based on quadrants, but I provide special cases for
@@ -551,14 +763,15 @@ thetaLabelOffsets t = case getZone t of
 -- offset).
 --
 drawTextTheta ::
-  (PolarCoord -> (Double, Double))
+  ((r,t) -> (Double, Double))
   -- ^ convert from r,theta to plot coordinates
-  -> PolarCoord
+  -> (Double, Double)
+  -- ^ center of the area, in display coordinates
+  -> (r,t)
   -> String
   -> ChartBackend ()
-drawTextTheta conv p txt =
+drawTextTheta conv (cx,cy) p txt =
   let (lx,ly) = conv p
-      (cx,cy) = conv (0,0)
       dx = lx - cx
       dy = cy - ly -- note: y increases down
       (lxoff,lyoff) = thetaLabelOffsets $ atan2 dy dx
@@ -566,7 +779,8 @@ drawTextTheta conv p txt =
                         
 -- | Convert a theta label value into the string to be displayed.
 -- 
---   This is the default setting for `PolarAxes`.
+--   This is the default setting when the theta axis has a type of
+--   @Double@ or @Degrees@.
 showThetaLabelDegrees ::
   Int       -- ^ the number of \"ticks\" to show, @nmax@, assumed to be greater than 1.
   -> Int    -- ^ "number" of the current \"tick mark\"; varies from @0@ to @nmax-1@ inclusive.
@@ -577,6 +791,8 @@ showThetaLabelDegrees n i =
 
 -- | Convert a theta label value into the string to be displayed.
 -- 
+--   This is the default setting when the theta axis has a type of
+--   @Radians@.
 showThetaLabelRadians ::
   Int       -- ^ the number of \"ticks\" to show, @nmax@, assumed to be greater than 1.
   -> Int    -- ^ "number" of the current \"tick mark\"; varies from @0@ to @nmax-1@ inclusive.
@@ -599,8 +815,12 @@ showThetaLabelRadians n i =
 
 -- | Render a single set of plot data onto a plot area of given size using
 --   the given axes.
-renderSinglePlot :: RectSize -> Maybe (Axes2T r t) -> Plot r t -> ChartBackend ()
-renderSinglePlot _ (Just (Axes2T axConv)) p =
+renderSinglePlot :: 
+  RectSize 
+  -> Double
+  -- ^ maxmimum radius , in device units, to draw
+  -> Maybe (PolarAxesData r t) -> Plot r t -> ChartBackend ()
+renderSinglePlot sz radius (Just adata) p =
   {-
   let xr = optPairReverse xrev (0, w)
       yr = optPairReverse yrev (h, 0)
@@ -612,17 +832,20 @@ renderSinglePlot _ (Just (Axes2T axConv)) p =
       mapv _    f (LValue v) = f v
   in _plot_render p pmfn
   -}
-  let conv (LValue a, LValue b) = uncurry Point $ axConv (a,b)
-      conv _ = Point 0 0 -- TODO: how to handle invlid points?
+  let axConv' = _polaraxes_viewport adata
+      axConv = axConv' sz radius
+      conv (LValue a, LValue b) = uncurry Point $ axConv (a,b)
+      conv _ = Point 0 0 -- TODO: how to handle invalid points?
       
   in _plot_render p conv
   
-renderSinglePlot _ _ _ = return ()
+renderSinglePlot _ _ _ _ = return ()
 
 -- Set up the lenses
 
 $( makeLenses ''PolarLayout )
-$( makeLenses ''PolarAxes )
+$( makeLenses ''PolarLayoutAxes )
+$( makeLenses ''PolarAxesData )
 
 -- Documentation
 --
@@ -636,7 +859,9 @@ $( makeLenses ''PolarAxes )
 -- Note that, at present, the Diagrams SVG back end is not guaranteed to
 -- dispay the filled circles. Hopefully it will be fixed before this code
 -- has been fixed up; see <https://github.com/timbod7/haskell-chart/issues/19>
--- for more information.
+-- for more information (it seems that this has now been fixed so we just need
+-- a Chart release (>1.2) to upgrade the lens constraint so that the updated
+-- diagrams code can be used).
 --
 -- > import qualified Graphics.Rendering.Chart.Backend.Cairo as C
 -- >
@@ -672,6 +897,7 @@ $( makeLenses ''PolarAxes )
 -- >                ]
 -- >   r1 <- rand
 -- >   r2 <- rand
+-- >   r3 <- rand
 -- >   shps <- replicateM npts (randomRIO (0,length shapes -1))
 -- >   let rs = map (2*) r1
 -- >       rads = zipWith (\ra rb -> sqrt (ra*100) * rb) rs r3
@@ -687,7 +913,7 @@ $( makeLenses ''PolarAxes )
 -- >                      $ point_border_width .~ 1
 -- >                      $ def
 -- >                    
--- >   return $ map pitem $ zip5 rs thetas rads cols
+-- >   return $ map pitem $ zip5 rs thetas rads cols shps
 -- > 
 -- > lPlot :: PlotLines Double Double
 -- > lPlot =
@@ -701,7 +927,7 @@ $( makeLenses ''PolarAxes )
 -- > bgFill = solidFillStyle (opaque gray)
 -- > pFill = solidFillStyle (withOpacity orange 0.4)
 -- >       
--- > testPlot :: ToPlot p => [p Double Double] -> PolarLayout
+-- > testPlot :: ToPlot p => [p Double Double] -> PolarLayout Double Double
 -- > testPlot pps = 
 -- >   polarlayout_title .~ "Polar plot"
 -- >     $ polarlayout_background .~ bgFill
@@ -721,11 +947,17 @@ $( makeLenses ''PolarAxes )
 -- This is /not/ intended as a usable API, more as an exploration of the
 -- design space. Issues include:
 --
+--   - now that @PolarLayout@ is parameterized by @r@ and @t@, can we 
+--     get back some of the functionality the earlier versions had
+--     (customizability but also functionality, as the current code
+--     seems like it is setting up things like the coordinate conversion
+--     routines too early in the process)
+--
 --   - allow theta values to be given in radians or degrees
 --
 --   - fix up axis positioning and size calculation; this is mainly improving
 --     the position of the axis tick labels and including this info in the
 --     size calculations.
 --
---   - generalize the approach for other non-cartesian projections
+--   - how much can we generalize to other non-cartesian projections
 --

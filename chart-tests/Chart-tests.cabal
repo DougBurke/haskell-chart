@@ -28,6 +28,7 @@ Extra-Source-Files:
      tests/Test15.hs,
      tests/Test17.hs,
      tests/TestParametric.hs,     
+     tests/TestPolar.hs,     
      tests/Prices.hs,
      tests/ExampleStocks.hs,
      tests/gtk/Prices.hs,

@@ -33,6 +33,7 @@ import qualified Test14a
 import qualified Test15
 import qualified Test17
 import qualified TestParametric
+import qualified TestPolar
 import qualified TestSparkLines
 
 type LineWidth = Double
@@ -225,31 +226,33 @@ test10LR prices lw = layout
 -------------------------------------------------------------------------------
 -- A quick test of stacked layouts
 
-test11_ f = f layout1 layout2
-  where
-    vs1 :: [(Int,Int)]
-    vs1 = [ (2,2), (3,40), (8,400), (12,60) ]
+spotsLayout :: Layout Int Int
+spotsLayout = 
+  let vs = [ (2,2), (3,40), (8,400), (12,60) ]
 
-    vs2 :: [(Int,Double)]
-    vs2 = [ (0,0.7), (3,0.35), (4,0.25), (7, 0.6), (10,0.4) ]
+      plot = plot_points_style .~ filledCircles 5 (opaque red)
+             $ plot_points_values .~ vs
+             $ plot_points_title .~ "spots"
+             $ def
 
-    plot1 = plot_points_style .~ filledCircles 5 (opaque red)
-          $ plot_points_values .~ vs1
-          $ plot_points_title .~ "spots"
-          $ def
+  in layout_title .~ "Multi typed stack"
+     $ layout_plots .~ [toPlot plot]
+     $ layout_y_axis . laxis_title .~ "integer values"
+     $ def
+  
+linesLayout :: Layout Int Double
+linesLayout = 
+  let vs = [ (0,0.7), (3,0.35), (4,0.25), (7, 0.6), (10,0.4) ]
+      
+      plot = plot_lines_values .~ [vs]
+             $ plot_lines_title .~ "lines"
+             $ def
 
-    layout1 = layout_title .~ "Multi typed stack"
-            $ layout_plots .~ [toPlot plot1]
-            $ layout_y_axis . laxis_title .~ "integer values"
-            $ def
+  in layout_plots .~ [toPlot plot]
+     $ layout_y_axis . laxis_title .~ "double values"
+     $ def
 
-    plot2 = plot_lines_values .~ [vs2]
-          $ plot_lines_title .~ "lines"
-          $ def
-
-    layout2 = layout_plots .~ [toPlot plot2]
-            $ layout_y_axis . laxis_title .~ "double values"
-            $ def
+test11_ f = f spotsLayout linesLayout
 
 mkStack ls f = 
   renderStackedLayouts 
@@ -450,6 +453,10 @@ allTests =
      , ("misc1f", stdSize, setPickFn nullPickFn . misc1 12 270)
      , ("misc1g", stdSize, setPickFn nullPickFn . misc1 12 315)
      , ("parametric", stdSize, \lw -> simple $ TestParametric.chart lw )
+     , ("polar1a", stdSize, const $ simple $ TestPolar.chart1 True False)
+     , ("polar1b", stdSize, const $ simple $ TestPolar.chart1 False True)
+     , ("polar2", stdSize, const $ simple $ TestPolar.chart2 True False)
+     , ("polar3", stdSize, const $ simple $ TestPolar.chart3 False True)
      , ("sparklines", TestSparkLines.chartSize, const $ simple TestSparkLines.chart )
      ]
   where simple :: Renderable a -> Renderable ()
