@@ -727,14 +727,19 @@ renderAxesAndGrid sz (cx,cy) radius pa adata = do
         Just (tmin, tmax) -> (scaleT tmin, scaleT tmax)
         _ -> (0, 2*pi)
 
-      tPath = case _polaraxes_theta_range adata of
-        Just _ -> makeLinesExplicit $ moveTo' cx cy <> arcNeg' cx cy cr tmin' tmax' <> close
-        _ -> arc' cx cy cr 0 (2*pi)
+      (rPoints, rAngle0) = case _polaraxes_theta_range adata of
+        Just (tmin, tmax) ->
+          let ps = uncurry Point $ conv (rmax, tmin)
+              pe = uncurry Point $ conv (rmax, tmax)
+          in ([ps, p0, pe], tmin)
+          
+        _ ->
+          let rAngle = _polaraxes_theta_zero adata
+              p1 = uncurry Point $ conv (rmax,rAngle)
+          in ([p1, p0], rAngle)
   
       p0 = Point cx cy
 
-      cr = radius
-      rAngle = _polaraxes_theta_zero adata
       margin = _polar_margin pa
       ticklen = _polar_ticklen pa
       
@@ -753,7 +758,7 @@ renderAxesAndGrid sz (cx,cy) radius pa adata = do
 
   -- theta axis and tick marks
   withLineStyle (_polar_theta_axis_style pa) $ do
-    strokePath tPath
+    strokePath (arcFn cx cy radius tmin' tmax')
     forM_ (_polaraxes_t_ticks adata) $ \theta ->
       let pmin = uncurry Point $ conv (rmax,theta)
           -- since do not have any numeric constraints on rmax,
@@ -766,15 +771,20 @@ renderAxesAndGrid sz (cx,cy) radius pa adata = do
       in alignStrokePoints [pmin, pmax] >>= strokePointPath
 
   -- radial axis and tick marks
+  --
+  -- The angle for the radial axis is only used when
+  -- a complete theta range is being displayed.
+  --    
   withLineStyle (_polar_radial_axis_style pa) $ do
-    let p1 = uncurry Point $ conv (rmax,rAngle)
+    let p1 = uncurry Point $ conv (rmax,rAngle0)
         dx = p_x p1 - cx
         dy = cy - p_y p1
         r = ticklen / sqrt (dx*dx + dy * dy)
         v = Vector (dy*r) (dx*r)
-    alignStrokePoints [p0, p1] >>= strokePointPath
+        
+    alignStrokePoints rPoints >>= strokePointPath
     forM_ (_polaraxes_r_ticks adata) $ \rt ->
-      let ps = uncurry Point $ conv (rt,rAngle)
+      let ps = uncurry Point $ conv (rt,rAngle0)
           pe = pvadd ps v
       in alignStrokePoints [ps, pe] >>= strokePointPath
       
