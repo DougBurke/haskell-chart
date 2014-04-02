@@ -46,6 +46,13 @@
 --  - radial axis labels should be centered/below the axis and at the
 --    same angle as the axis?
 --
+--  - there is a lot of logic in renderAxesAndGrid to determine where
+--    to draw the axes; should this have already been calculated when
+--    generating the PolarAxesData structure, and the render routine
+--    just plots up the values?
+--
+--  - how to fill an annulus (e.g. circle(x,y,r1)-circle(x,y,r2) with r1>r2)?
+--
 module Graphics.Rendering.Chart.Plot.Polar(
   
   -- * Example
@@ -119,7 +126,7 @@ module Graphics.Rendering.Chart.Plot.Polar(
        where
 
 import Control.Arrow ((***))
-import Control.Monad (forM_)
+import Control.Monad ((>=>), forM_, when)
 import Control.Lens
 
 import Data.Colour
@@ -139,7 +146,7 @@ import Graphics.Rendering.Chart.Grid (aboveN, besideN, gridToRenderable, tval, w
 import Graphics.Rendering.Chart.Legend
 import Graphics.Rendering.Chart.Plot.Types
 import Graphics.Rendering.Chart.Renderable
-import Graphics.Rendering.Chart.Utils (maximum0)
+import Graphics.Rendering.Chart.Utils (maximum0, maybeM)
 
 {-
 NOTES:
@@ -673,23 +680,11 @@ renderPolarLayout pl sz@(w,h) = do
       points = (concat *** concat) $ unzip $ map _plot_all_points plots
       
       adata = _polar_axes_generate pa points
-      -- conv = _polaraxes_viewport adata sz radius 
-      scaleT = _polaraxes_theta_scale adata
       
-      bPath = case _polaraxes_theta_range adata of
-        Just (tmin, tmax) ->
-          let tmin' = scaleT tmin
-              tmax' = scaleT tmax
-          in makeLinesExplicit $ moveTo' center_x center_y <> arcNeg' center_x center_y radius tmin' tmax'
-        _ -> arc' center_x center_y radius 0 (2*pi)
-      
-  case _polarlayout_plot_background pl of
-    Nothing -> return ()
-    Just fs -> withFillStyle fs $ alignFillPath bPath >>= fillPath
-  
   -- QUS: would it make sense to do the grid/axis within the clip
   --      region too?
-  renderAxesAndGrid sz (center_x,center_y) radius pa adata
+  renderAxesAndGrid sz (center_x,center_y) radius pa adata 
+    (_polarlayout_plot_background pl) (_polarlayout_background pl)
   withClipRegion (Rect (Point 0 0) (Point w h)) $
     mapM_ (renderSinglePlot sz radius (Just adata)) plots
   
@@ -710,18 +705,29 @@ renderAxesAndGrid ::
   -- ^ Max radius (display coordinates)
   -> PolarLayoutAxes r t
   -> PolarAxesData r t
+  -> Maybe FillStyle
+  -- ^ How to fill the background of the plot area
+  -> FillStyle
+  -- ^ The fill style for the whole layout (it is
+  --   only needed as a hack for plots with a full
+  --   theta range but a limited radial range).
   -> ChartBackend ()
-renderAxesAndGrid sz (cx,cy) radius pa adata = do
+renderAxesAndGrid sz (cx,cy) radius pa adata mbg bfs = do
   let conv = _polaraxes_viewport adata sz radius
       scaleR = _polaraxes_r_scale adata radius
       scaleT = _polaraxes_theta_scale adata
       (rmin, rmax) = _polaraxes_r_range adata
+      rmin' = scaleR rmin
+      pconv = uncurry Point . conv
   
       -- TODO: clean up the repeated checks on whether there is
       --       a restricted theta range or not
-      arcFn = if isJust (_polaraxes_theta_range adata) 
-              then arcNeg'
-              else arc'
+      --
+      -- True if a restricted theta range is being displayed
+      hasThetaRange = isJust (_polaraxes_theta_range adata) 
+      (arcFn, arcFn') = if hasThetaRange
+                        then (arcNeg', arc')
+                        else (arc', arcNeg')
                          
       (tmin', tmax') = case _polaraxes_theta_range adata of
         Just (tmin, tmax) -> (scaleT tmin, scaleT tmax)
@@ -729,20 +735,55 @@ renderAxesAndGrid sz (cx,cy) radius pa adata = do
 
       (rPoints, rAngle0) = case _polaraxes_theta_range adata of
         Just (tmin, tmax) ->
-          let ps = uncurry Point $ conv (rmax, tmin)
-              pe = uncurry Point $ conv (rmax, tmax)
-          in ([ps, p0, pe], tmin)
+          let ps = pconv (rmax, tmin)
+              pe = pconv (rmax, tmax)
+          in if rmin' > 0
+             then ([[ps, pconv (rmin,tmin)], [pe, pconv (rmin,tmax)]], tmin)
+             else ([[ps, p0, pe]], tmin)
           
         _ ->
           let rAngle = _polaraxes_theta_zero adata
-              p1 = uncurry Point $ conv (rmax,rAngle)
-          in ([p1, p0], rAngle)
+              p1 = pconv (rmax,rAngle)
+          in if rmin' > 0
+             then ([[p1, pconv (rmin,rAngle)]], rAngle)
+             else ([[p1, p0]], rAngle)
   
+      -- TODO: work in progress; the remaining problem is to
+      --       create an annulus (i.e. when the full theta range
+      --       is displayed but only a subset of the radius).
+      --
+      --       The 'solution' is to fill two circles, with the
+      --       inner circle matching the background area, but
+      --       this is a hack that should be replaced.
+      --
+      (bPath, mbPath) = 
+        let aout = arcFn cx cy radius tmin' tmax'
+            ain  = arcFn' cx cy rmin' tmax' tmin'
+        in case _polaraxes_theta_range adata of
+          Just _ -> 
+            if rmin' > 0
+            then (aout <> ain, Nothing)
+            else (moveTo' cx cy <> aout, Nothing)
+          _ -> if rmin' > 0
+               then (aout, Just ain)
+               else (aout, Nothing)
+
       p0 = Point cx cy
 
       margin = _polar_margin pa
       ticklen = _polar_ticklen pa
       
+  -- Fill in the plot area?
+  case mbg of
+    Nothing -> return ()
+    Just fs -> do
+      -- TODO:
+      -- I do not know how to create a filled annulus,
+      -- so I "fake" it by filling in the inner circle
+      -- with the general background fill style.
+      withFillStyle fs $ alignFillPath bPath >>= fillPath
+      maybeM () (\bp -> withFillStyle bfs (alignFillPath bp >>= fillPath)) mbPath
+  
   -- Draw the grid lines
   withLineStyle (_polar_grid_style pa) $ do
     -- constant r
@@ -752,42 +793,49 @@ renderAxesAndGrid sz (cx,cy) radius pa adata = do
     
     -- constant theta
     forM_ (_polaraxes_t_grid adata) $ \theta ->
-      let pmin = uncurry Point $ conv (rmin,theta)
-          pmax = uncurry Point $ conv (rmax,theta)
+      let pmin = pconv (rmin,theta)
+          pmax = pconv (rmax,theta)
       in alignStrokePoints [pmin, pmax] >>= strokePointPath
 
   -- theta axis and tick marks
   withLineStyle (_polar_theta_axis_style pa) $ do
+    when (rmin' > 0) $
+      strokePath (arcFn cx cy rmin' tmin' tmax')
     strokePath (arcFn cx cy radius tmin' tmax')
-    forM_ (_polaraxes_t_ticks adata) $ \theta ->
-      let pmin = uncurry Point $ conv (rmax,theta)
-          -- since do not have any numeric constraints on rmax,
-          -- need to apply the scaling to the display coordinate
-          -- values
-          pmax = pvadd pmin $ Vector (dx*r) (dy*r) 
-          dx = p_x pmin - cx
-          dy = p_y pmin - cy
+    forM_ (_polaraxes_t_ticks adata) $ \theta -> do
+      let p1 = pconv (rmax,theta)
+          p2 = pconv (rmin,theta)
+          v = Vector (dx*r) (dy*r) 
+          dx = p_x p1 - cx
+          dy = p_y p1 - cy
           r = ticklen / sqrt (dx*dx + dy*dy)
-      in alignStrokePoints [pmin, pmax] >>= strokePointPath
+      alignStrokePoints [p1, pvadd p1 v] >>= strokePointPath
+      when (rmin' > 0) $
+        alignStrokePoints [p2, pvsub p2 v] >>= strokePointPath
 
   -- radial axis and tick marks
   --
-  -- The angle for the radial axis is only used when
-  -- a complete theta range is being displayed.
-  --    
   withLineStyle (_polar_radial_axis_style pa) $ do
-    let p1 = uncurry Point $ conv (rmax,rAngle0)
+    let p1 = pconv (rmax,rAngle0)
         dx = p_x p1 - cx
         dy = cy - p_y p1
         r = ticklen / sqrt (dx*dx + dy * dy)
-        v = Vector (dy*r) (dx*r)
+        v1 = Vector (dy*r) (dx*r)
+        v2 = Vector (-dy*r) (dx*r)
         
-    alignStrokePoints rPoints >>= strokePointPath
+    forM_ rPoints $ alignStrokePoints >=> strokePointPath
     forM_ (_polaraxes_r_ticks adata) $ \rt ->
-      let ps = uncurry Point $ conv (rt,rAngle0)
-          pe = pvadd ps v
+      let ps = pconv (rt,rAngle0)
+          pe = pvadd ps v1
       in alignStrokePoints [ps, pe] >>= strokePointPath
       
+    maybeM () (\(_,tmax) -> 
+                forM_ (_polaraxes_r_ticks adata) $ \rt ->
+                  let ps = pconv (rt,tmax)
+                      pe = pvadd ps v2
+                  in alignStrokePoints [ps, pe] >>= strokePointPath)
+      (_polaraxes_theta_range adata)
+
   -- axis labels
   -- TODO: improve positioning of labels
   --       - should the angle be a user option - ie either force    
@@ -798,7 +846,7 @@ renderAxesAndGrid sz (cx,cy) radius pa adata = do
     --
     -- TODO: use thetaLabelOffsets  or maybe need a radialLabelOffsets?
     forM_ (_polaraxes_r_labels adata) $ \(r,t,txt) -> 
-      let pos = uncurry Point $ conv (r,t)
+      let pos = pconv (r,t)
           ang = 180.8 * scaleT t / pi -- angle in degrees
           dx = p_x pos - cx
           dy = cy - p_y pos
