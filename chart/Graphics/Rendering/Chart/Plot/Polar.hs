@@ -819,9 +819,8 @@ renderAxesAndGrid sz (cx,cy) radius pa adata mbg bfs = do
     let p1 = pconv (rmax,rAngle0)
         dx = p_x p1 - cx
         dy = cy - p_y p1
-        r = ticklen / sqrt (dx*dx + dy * dy)
-        v1 = Vector (dy*r) (dx*r)
-        v2 = Vector (-dy*r) (dx*r)
+        r = ticklen / sqrt (dx*dx + dy*dy)
+        v1 = Vector (dy*r) (dx*r) 
         
     forM_ rPoints $ alignStrokePoints >=> strokePointPath
     forM_ (_polaraxes_r_ticks adata) $ \rt ->
@@ -830,10 +829,16 @@ renderAxesAndGrid sz (cx,cy) radius pa adata mbg bfs = do
       in alignStrokePoints [ps, pe] >>= strokePointPath
       
     maybeM () (\(_,tmax) -> 
-                forM_ (_polaraxes_r_ticks adata) $ \rt ->
-                  let ps = pconv (rt,tmax)
-                      pe = pvadd ps v2
-                  in alignStrokePoints [ps, pe] >>= strokePointPath)
+                let p1' = pconv (rmax, tmax)
+                    dx' = p_x p1' - cx
+                    dy' = cy - p_y p1'
+                    r' = ticklen / sqrt (dx'*dx' + dy'*dy')
+                    v2 = Vector (dy'*r') (dx'*r')
+        
+                in forM_ (_polaraxes_r_ticks adata) $ \rt ->
+                     let ps = pconv (rt,tmax)
+                         pe = pvsub ps v2
+                     in alignStrokePoints [ps, pe] >>= strokePointPath)
       (_polaraxes_theta_range adata)
 
   -- axis labels
