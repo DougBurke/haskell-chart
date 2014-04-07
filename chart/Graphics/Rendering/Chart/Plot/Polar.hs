@@ -108,7 +108,6 @@ module Graphics.Rendering.Chart.Plot.Polar(
   , polar_axes_filter_plots    
   , polar_axes_generate
     
-  , polaraxes_viewport
   , polaraxes_r_scale
   , polaraxes_theta_scale
   , polaraxes_r_range
@@ -406,20 +405,9 @@ autoScaledAxes scaleR scaleT tZero tRev (rs,ts) =
 
       (ttickvs, tlabelvs, tgridvs) = scaleT ts
       
-      -- NOTE: this, as written, is generic since the scaling is handled by
-      --       radialScale/thetaScale, so we could "hard code" this conversion
-      --       rather than making it user configureable.
-      coordConv (w,h) radius (r,theta) = 
-        let rr = radialScale radius r
-            theta' = thetaScale theta
-        in ( w/2 + rr * cos theta'
-           , h/2 + rr * sin theta' ) 
-      
   in PolarAxesData {
-    _polaraxes_viewport = coordConv
-    , _polaraxes_r_scale = radialScale
+      _polaraxes_r_scale = radialScale
     , _polaraxes_theta_scale = thetaScale
-    -- , _polaraxes_tropweiv = undefined
                             
     , _polaraxes_r_range = (rMin, rMax)
     , _polaraxes_theta_range = Nothing
@@ -503,35 +491,24 @@ data PolarAxesT r t =
 
 -}
   
--- intended to be equivalent to AxisData
---
--- do viewport/tropweiv need the width/height sent in
--- or some other scaling information? or is this sent in
--- when creating this structure - e.g. in autoPolarAxes?
--- It would seem that RectSize should be known about by
--- viewport (ie can be hardcoded) rather than re-calculated
--- each time
---
-  
 -- | This is intended to be similar to the `AxisData`
 --   type but is somewhat of a grab-bag of functionality
 --   at this time, in part because there is currently no 
 --   equivalent of `AxisT`.  
 --  
+--   TODO:
+--    - With the removal of the viewport routine, should
+--      this be simplified so that the axis-specific  
+--      routines (e.g. radial or theta) are handled  
+--      by individual structures and this is just a  
+--      container for them? The idea being that it  
+--      is easier to re-use the setup for one of the  
+--      axes with different types of the other?  
+--  
 data PolarAxesData r t =
   PolarAxesData 
   {
-    -- TODO: should the viewport return Maybe for invalid (r,t) values?
-    _polaraxes_viewport :: RectSize 
-                           -> Double -- maximum radius, in pixel units
-                           -> (r,t) -> (Double, Double)
-    -- ^ At present this can be generated automatically from
-    --   @_polaraxes_r_scale@ and @_polaraxes_theta_scale@,
-    --   which suggests that we could go back to having
-    --   separate axis structures (but different from the
-    --   linear/1D case) rather than this composite form.
-                           
-  , _polaraxes_r_scale :: Double -> r -> Double
+    _polaraxes_r_scale :: Double -> r -> Double
     -- ^ Convert the radial coordinate to a pixel value. The
     --   first argument is the maximum radius, in pixel units.
     
@@ -540,8 +517,6 @@ data PolarAxesData r t =
     --   clockwise from the horizontal.
     --
   
-    -- , _polaraxes_tropweiv :: RectSize -> (Double, Double) -> (r,t)
-    
   , _polaraxes_r_range :: (r,r)  
     -- ^ The minimum and maximum r shown.
     
@@ -566,6 +541,24 @@ data PolarAxesData r t =
 
   }
 
+-- This used to be in PolarAxesData but pulled out
+-- as it is a fixed function of the r and theta scaling
+-- routines.
+--
+_polaraxes_viewport :: 
+  PolarAxesData r t
+  -> (Double, Double) 
+  -- ^ center of the plot, in device units
+  -> Double 
+  -- ^ maximum radius of the plot, in device units 
+  -> (r,t) 
+  -> (Double, Double)
+_polaraxes_viewport adata (cx,cy) radius (r,t) =  
+  let r' = _polaraxes_r_scale adata radius r
+      t' = _polaraxes_theta_scale adata t
+  in ( cx + r' * cos t'
+     , cy + r' * sin t' ) 
+      
 instance ToRenderable (PolarLayout r t) where
   toRenderable = setPickFn nullPickFn . polarLayoutToRenderable
 
@@ -617,18 +610,21 @@ mkLegend mls lm vals = case mls of
         lvs -> addMargins (0,lm,lm,lm) $
                    setPickFn nullPickFn $ legendToRenderable (Legend ls lvs)
 
--- TODO: have to work out extra size here rather than hard code it!
-extraSpace ::
-  PolarLayout r t
-  -> ChartBackend (Double, Double)
-extraSpace _ = return (10,10)
-
+-- QUESTION: what is the meaning of this? I'm not sure 
+-- how to calculate any sort of a meaningful value without
+-- access to the data values. For now just use a simple
+-- heuristic, based on the margin size and the size of
+-- the label \"180\".
+--        
 minsizePolarLayout ::
   PolarLayout r t
   -> ChartBackend (Double, Double)
 minsizePolarLayout pl = do
-  (extraw, extrah) <- extraSpace pl
-  return (extraw * 2, extrah * 2)
+  let pa = _polarlayout_axes pl
+      m = _polar_margin pa
+  (tw, th) <- withFontStyle (_polar_axes_label_style pa) $
+              textDimension "180"
+  return ((tw+m) * 2, (th+m) * 2)
 
 -- unit conversion
 d2r :: RealFloat a => a -> a
@@ -662,31 +658,193 @@ filterPlots = filter (not . null . fst . _plot_all_points) . map noNeg
           fpts = filter ((>=0) . fst) pts
       in pp { _plot_all_points = unzip fpts }
 
+{-
+The code below, to calculate the coordinates of (r=0,theta=0)
+in device untis, seems overly complicated. This is in part
+because of several different coordinate systems, including
+switching between measuring angles clockwise and anti-clockwise
+and whether the Y axis is measured increasing up or down, but
+it I also think I've missed a simple trick to simplify a
+lot of the range code; that is, the code that calculates the
+extent of a plot (when the theta range is limited), in
+units of the radius, and the mapping to pixel coordinates,
+including centering of the plot. This is before thinking
+about accurate calculation of the margins, since the plot
+size determines the margins, but you can't calculate the
+plot size without knowing the margins.
+-}
+
+-- | Calculate the origin and maximum radius of the polar plot.
+--
+--   TODO:
+--    
+--   - once the original guess at the size has been calculated,    
+--     should the label sizes be checked (now that their    
+--     positions are known) and the size re-calculated?    
+--     This would then let cases where a long radial label
+--     overlaps the edge to be caught, at the expense of
+--     some potentially iterative loop (hopefully it would    
+--     converge quickly, but there's always the possibility    
+--     of some strange oscillation that would have to be
+--     guarded against).    
+--    
+calculateArea ::
+  PolarLayoutAxes r t
+  -> PolarAxesData r t
+  -> RectSize
+  -> ChartBackend (Double, Double, Double, Double, Double)
+  -- ^ Returns @(cx,cy,r,mx,my)@ - the center of the plot, the
+  --   maximum radius, and the margins from the left/bottom
+  --   edge, all in device coordinates. The margins were useful
+  --   in debugging and left in for now. Perhaps I should
+  --   just return a @Rect@ representing the bounding-box of the
+  --   plot itself within the @RectSize@ area.
+calculateArea pa adata (w,h) = do  
+  let m = _polar_margin pa
+  (tw, th) <- withFontStyle (_polar_axes_label_style pa) $
+              textDimension "180"
+  
+  let dx = tw + m
+      dy = th + m
+      px = w - dx * 2
+      py = h - dy * 2
+      
+      ((xl,yl),(xh,yh)) = calcBBox (_polaraxes_theta_scale adata) (_polaraxes_theta_range adata)
+      
+      -- work out the radius given the aspect ratio of
+      -- the plot bounding box and the rectangle
+      
+      -- bx and by give the bounding box in units of the radius
+      -- so the radius is the minimum of px/bx and py/by
+      (bx, by) = (xh-xl, yh-yl)
+      rx = px/bx
+      ry = py/by
+      radius = min rx ry
+      
+      -- Calculate the center using the bounding-box coordinates
+      -- and then shift the 'longer' axis so that the plot
+      -- is centered.
+      xcen = -xl * radius + dx
+      ycen =  yl * radius + dy + py
+      (cx, cy) = 
+        if rx <= ry
+        then (xcen, ycen - ((py - by * radius) / 2))
+        else (xcen + ((px - bx * radius) / 2), ycen)
+      
+      -- TODO: support asymmetric margins
+  
+  return (cx, cy, radius, dx, dy)
+  
+-- TODO: 
+--    - if have a partial r range (ie rmin > 0) then  
+--      could restrict to just the plot range (i.e.  
+--      no longer assume that r=0 is included)
+--  
+calcBBox :: 
+  (t -> Double)
+  -- ^ Convert the theta coordinate into radians
+  -> Maybe (t,t) 
+  -- ^ The theta range of the plot (if @Nothing@ then use 0 to 2pi)
+  -> ((Double, Double), (Double,Double))
+  -- ^ Coordinates of the lower-left and upper-right corners
+  --   of the bounding box, using a normalized coordinate system
+  --   ranging from -1 to 1 (X increasing to the right and Y
+  --   increasing UP).
+calcBBox _    Nothing = ((-1,-1), (1,1))
+calcBBox conv (Just (tmin,tmax)) = 
+  let -- conv converts to a clockwise value so need to
+      -- convert back to anti-clockwise
+      (tmin', tmax') = (-conv tmin, -conv tmax)
+      (x1, x2) = (cos tmin', cos tmax')
+      (y1, y2) = (sin tmin', sin tmax')
+      zs = calcCardinal tmin' tmax'
+      xs = [0, x1, x2] ++ xranges zs
+      ys = [0, y1, y2] ++ yranges zs
+      (xl, xh) = (minimum xs, maximum xs)
+      (yl, yh) = (minimum ys, maximum ys)
+  in ((xl,yl), (xh,yh))
+  
+-- | Return +/-1 values for each cardinal point that is
+--   included in the zone list.
+--
+--   TODO: is the coordinate system for yranges correct?
+xranges, yranges :: [Zone] -> [Double]
+xranges [] = []
+xranges (x:xs) = let rest = xranges xs
+                 in case x of
+                   ZR -> 1 : rest
+                   ZL -> -1 : rest
+                   _  -> rest
+yranges [] = []
+yranges (y:ys) = let rest = yranges ys
+                 in case y of
+                   ZT -> 1 : rest
+                   ZB -> -1 : rest
+                   _  -> rest
+  
+-- | Given the start and end angles of the plot, what
+--   cardinal angles are included in the range?
+--
+--   This mixes up zones and cardinal points, and - since it uses
+--   getZone - is only approximate
+--   
+calcCardinal :: 
+  Double 
+  -- ^ Start angle, in radians, measured anti-clockwise from the horizontal.
+  -> Double 
+  -- ^ End angle, in radians, measured anti-clockwise from the horizontal.
+  -> [Zone]
+calcCardinal tmin tmax =
+  let z1 = getZone tmin
+      z2 = getZone tmax
+      
+      -- Since theta is periodic, can not rely on
+      -- tmin' <= tmax' to determine whether the
+      -- clockwise rotation from min to max is
+      -- < 90 degrees or > 270 degrees, so use
+      -- the absolute Y coordinate instead.
+      --
+      as1 = abs $ sin tmin
+      as2 = abs $ sin tmax
+      
+      cardinal = [ZR, ZT, ZL, ZB]
+  in if z1 == z2
+        -- Does the region stay in this zone/quadrant
+        -- (separation < 90 degrees) or cover the
+        -- all the quadrants (separation > 270 degrees).
+        -- TODO: the following could be cleaned up but
+        --       left as is to retain the logic
+     then if (z1 < ZT && as1 <= as2) || 
+             (z1 >= ZT && z1 < ZL && as1 >= as2) ||
+             (z1 >= ZL && z1 < ZB && as1 <= as2) ||
+             (z1 >= ZB && as1 >= as2)
+          then []
+          else cardinal
+     else -- if z1 > z2 then we have to cross theta=0 to get
+          -- from tmin to tmax
+       if z1 > z2
+          then takeWhile (<=z2) cardinal ++ dropWhile (<z1) cardinal
+          else takeWhile (<=z2) $ dropWhile (<z1) cardinal
+
 renderPolarLayout :: 
   PolarLayout r t
   -> RectSize
   -> ChartBackend (PickFn a)
 renderPolarLayout pl sz@(w,h) = do
-  (extraw, extrah) <- minsizePolarLayout pl
-  let center_x = w/2
-      center_y = h/2
-      
-      pa = _polarlayout_axes pl
-      
-      radius = min (w - extraw) (h - extrah) / 2
-      
+  let pa = _polarlayout_axes pl
       allPlots = _polarlayout_plots pl
       plots = _polar_axes_filter_plots pa allPlots
       points = (concat *** concat) $ unzip $ map _plot_all_points plots
-      
       adata = _polar_axes_generate pa points
+      
+  (cx, cy, radius, _, _) <- calculateArea pa adata sz 
       
   -- QUS: would it make sense to do the grid/axis within the clip
   --      region too?
-  renderAxesAndGrid sz (center_x,center_y) radius pa adata 
+  renderAxesAndGrid (cx,cy) radius pa adata 
     (_polarlayout_plot_background pl) (_polarlayout_background pl)
   withClipRegion (Rect (Point 0 0) (Point w h)) $
-    mapM_ (renderSinglePlot sz radius (Just adata)) plots
+    mapM_ (renderSinglePlot (cx,cy) radius adata) plots
   
   return nullPickFn
 
@@ -698,8 +856,6 @@ renderPolarLayout pl sz@(w,h) = do
 --  
 renderAxesAndGrid ::
   (Double,Double)
-  -- ^ width,height (display coordinates)
-  -> (Double,Double)
   -- ^ center (display coordinates)
   -> Double
   -- ^ Max radius (display coordinates)
@@ -712,14 +868,16 @@ renderAxesAndGrid ::
   --   only needed as a hack for plots with a full
   --   theta range but a limited radial range).
   -> ChartBackend ()
-renderAxesAndGrid sz (cx,cy) radius pa adata mbg bfs = do
-  let conv = _polaraxes_viewport adata sz radius
+renderAxesAndGrid (cx,cy) radius pa adata mbg bfs = do
+  let conv = _polaraxes_viewport adata (cx,cy) radius
       scaleR = _polaraxes_r_scale adata radius
       scaleT = _polaraxes_theta_scale adata
       (rmin, rmax) = _polaraxes_r_range adata
       rmin' = scaleR rmin
       pconv = uncurry Point . conv
   
+      p0 = Point cx cy
+
       -- TODO: clean up the repeated checks on whether there is
       --       a restricted theta range or not
       --
@@ -767,8 +925,6 @@ renderAxesAndGrid sz (cx,cy) radius pa adata mbg bfs = do
           _ -> if rmin' > 0
                then (aout, Just ain)
                else (aout, Nothing)
-
-      p0 = Point cx cy
 
       margin = _polar_margin pa
       ticklen = _polar_ticklen pa
@@ -852,7 +1008,7 @@ renderAxesAndGrid sz (cx,cy) radius pa adata mbg bfs = do
     -- TODO: use thetaLabelOffsets  or maybe need a radialLabelOffsets?
     forM_ (_polaraxes_r_labels adata) $ \(r,t,txt) -> 
       let pos = pconv (r,t)
-          ang = 180.8 * scaleT t / pi -- angle in degrees
+          ang = r2d $ scaleT t -- angle in degrees
           dx = p_x pos - cx
           dy = cy - p_y pos
           rscale = margin / sqrt (dx*dx + dy*dy)
@@ -870,12 +1026,19 @@ renderAxesAndGrid sz (cx,cy) radius pa adata mbg bfs = do
 -- positions close to n pi / 2 (n=0, 1, 2, 3). This is a quick hack to
 -- improve label positioning but is not likely to be sufficient.
 --
-
+-- It mixes up two concepts - the cardinal locations and the quadrants
+-- of a circle - and was originally created for calculating the
+-- alignment of the theta labels, but is now also being used in
+-- calculating the plot position/size.    
+--    
 data Zone =
+  {-
   ZR | ZT | ZL | ZB -- the four "cardinal" locations (right, top, left, or bottom)
   |
   ZQ1 | ZQ2 | ZQ3 | ZQ4 -- the four quadrants
-  deriving Eq
+  -}
+  ZR | ZQ1 | ZT | ZQ2 | ZL | ZQ3 | ZB | ZQ4
+  deriving (Eq, Ord)
            
 -- convert theta, in radians, measured anti-clockwise from the horizontal,
 -- into a zone, ignoring the loss of precision due to rounding/using a
@@ -982,31 +1145,20 @@ showThetaLabelRadians n i =
 -- | Render a single set of plot data onto a plot area of given size using
 --   the given axes.
 renderSinglePlot :: 
-  RectSize 
+  (Double,Double)
+  -- ^ center (display coordinates)
   -> Double
   -- ^ maxmimum radius , in device units, to draw
-  -> Maybe (PolarAxesData r t) -> Plot r t -> ChartBackend ()
-renderSinglePlot sz radius (Just adata) p =
-  {-
-  let xr = optPairReverse xrev (0, w)
-      yr = optPairReverse yrev (h, 0)
-      -- yrange = if yrev then (0, h) else (h, 0)
-      pmfn (x,y) = Point (mapv xr (_axis_viewport xaxis xr) x)
-                         (mapv yr (_axis_viewport yaxis yr) y)
-      mapv lims _ LMin       = fst lims
-      mapv lims _ LMax       = snd lims
-      mapv _    f (LValue v) = f v
-  in _plot_render p pmfn
-  -}
-  let axConv' = _polaraxes_viewport adata
-      axConv = axConv' sz radius
+  -> PolarAxesData r t
+  -> Plot r t 
+  -> ChartBackend ()
+renderSinglePlot (cx,cy) radius adata p =
+  let axConv = _polaraxes_viewport adata (cx,cy) radius
       conv (LValue a, LValue b) = uncurry Point $ axConv (a,b)
       conv _ = Point 0 0 -- TODO: how to handle invalid points?
       
   in _plot_render p conv
   
-renderSinglePlot _ _ _ _ = return ()
-
 -- Set up the lenses
 
 $( makeLenses ''PolarLayout )
