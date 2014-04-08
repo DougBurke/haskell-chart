@@ -125,13 +125,14 @@ module Graphics.Rendering.Chart.Plot.Polar(
        where
 
 import Control.Arrow ((***))
-import Control.Monad ((>=>), forM_, when)
+import Control.Monad ((>=>), forM, forM_, when)
 import Control.Lens
 
+import Data.Char (chr)
 import Data.Colour
 import Data.Colour.Names
 import Data.Default.Class
-import Data.Char (chr)
+import Data.List (foldl1')
 import Data.Maybe (isJust)
 import Data.Monoid ((<>))
 
@@ -610,6 +611,17 @@ mkLegend mls lm vals = case mls of
         lvs -> addMargins (0,lm,lm,lm) $
                    setPickFn nullPickFn $ legendToRenderable (Legend ls lvs)
 
+-- Use the label \"180\" to guess the margins for the
+-- plot, combined with the _polar_margin value.  
+guessMargins ::
+  PolarLayoutAxes r t
+  -> ChartBackend (Double, Double)
+guessMargins pa = do
+  let m = _polar_margin pa
+  (tw,th) <- withFontStyle (_polar_axes_label_style pa) $
+             textDimension "180"
+  return (tw+m, th+m)
+  
 -- QUESTION: what is the meaning of this? I'm not sure 
 -- how to calculate any sort of a meaningful value without
 -- access to the data values. For now just use a simple
@@ -620,11 +632,8 @@ minsizePolarLayout ::
   PolarLayout r t
   -> ChartBackend (Double, Double)
 minsizePolarLayout pl = do
-  let pa = _polarlayout_axes pl
-      m = _polar_margin pa
-  (tw, th) <- withFontStyle (_polar_axes_label_style pa) $
-              textDimension "180"
-  return ((tw+m) * 2, (th+m) * 2)
+  (mx, my) <- guessMargins $ _polarlayout_axes pl
+  return (mx*2, my*2)
 
 -- unit conversion
 d2r :: RealFloat a => a -> a
@@ -688,28 +697,23 @@ plot size without knowing the margins.
 --     of some strange oscillation that would have to be
 --     guarded against).    
 --    
+-- TODO: support asymmetric margins
+--  
 calculateArea ::
-  PolarLayoutAxes r t
-  -> PolarAxesData r t
+  (Double, Double)
+  -- ^ Estimate of the margin width and height for the plot
+  -> PlotBBox
   -> RectSize
-  -> ChartBackend (Double, Double, Double, Double, Double)
-  -- ^ Returns @(cx,cy,r,mx,my)@ - the center of the plot, the
-  --   maximum radius, and the margins from the left/bottom
-  --   edge, all in device coordinates. The margins were useful
-  --   in debugging and left in for now. Perhaps I should
-  --   just return a @Rect@ representing the bounding-box of the
-  --   plot itself within the @RectSize@ area.
-calculateArea pa adata (w,h) = do  
-  let m = _polar_margin pa
-  (tw, th) <- withFontStyle (_polar_axes_label_style pa) $
-              textDimension "180"
-  
-  let dx = tw + m
-      dy = th + m
-      px = w - dx * 2
+  -> (Double, Double, Double, Rect)
+  -- ^ Returns @(cx,cy,r,bbox)@ - the center of the plot, the
+  --   maximum radius, and the bounding box of the plot,
+  --   in device coordinates. The bounding box gives the smallest
+  --   rectangle enclosing the plot itself (excluding ticks and
+  --   labels); it was useful in testing so is left as a return
+  --   value but may be removed in future revisions.
+calculateArea (dx,dy) ((xl,yl),(xh,yh)) (w,h) = 
+  let px = w - dx * 2
       py = h - dy * 2
-      
-      ((xl,yl),(xh,yh)) = calcBBox (_polaraxes_theta_scale adata) (_polaraxes_theta_range adata)
       
       -- work out the radius given the aspect ratio of
       -- the plot bounding box and the rectangle
@@ -731,10 +735,22 @@ calculateArea pa adata (w,h) = do
         then (xcen, ycen - ((py - by * radius) / 2))
         else (xcen + ((px - bx * radius) / 2), ycen)
       
-      -- TODO: support asymmetric margins
+      rect = Rect (Point dx dy) (Point (px+dx) (py+dy))
   
-  return (cx, cy, radius, dx, dy)
+  in (cx, cy, radius, rect)
   
+-- The limits of the minimum box surrounding the plot     
+-- itself (so ignoring ticks/margins/labels), given
+-- in units of the radius, so ((-1,-1), (1,1))
+-- is the full circle.
+--
+-- The coordinate system is as viewed on screen,
+-- so X increases left to right and Y increases
+-- bottom to top, which means that Y has to be
+-- flipped to map it to device coordinates.
+--
+type PlotBBox = ((Double, Double), (Double, Double))
+                               
 -- TODO: 
 --    - if have a partial r range (ie rmin > 0) then  
 --      could restrict to just the plot range (i.e.  
@@ -745,11 +761,7 @@ calcBBox ::
   -- ^ Convert the theta coordinate into radians
   -> Maybe (t,t) 
   -- ^ The theta range of the plot (if @Nothing@ then use 0 to 2pi)
-  -> ((Double, Double), (Double,Double))
-  -- ^ Coordinates of the lower-left and upper-right corners
-  --   of the bounding box, using a normalized coordinate system
-  --   ranging from -1 to 1 (X increasing to the right and Y
-  --   increasing UP).
+  -> PlotBBox
 calcBBox _    Nothing = ((-1,-1), (1,1))
 calcBBox conv (Just (tmin,tmax)) = 
   let -- conv converts to a clockwise value so need to
@@ -826,6 +838,110 @@ calcCardinal tmin tmax =
           then takeWhile (<=z2) cardinal ++ dropWhile (<z1) cardinal
           else takeWhile (<=z2) $ dropWhile (<z1) cardinal
 
+-- | Calculate the position and scaling used to draw the
+--   plot based on the available space, label positions,
+--   and data. This is an iterative solution, since you
+--   need to know the scaling to work out the label positions,
+--   and hence margins, but to know the scaling you need
+--   to know the position.
+--
+--   The iterative solution here is *VERY* limited, in that
+--   margins are calculated using the max size of the labels,
+--   so that an initial position/scale can be found, then
+--   this is used to calculate the position of the labels
+--   and the margins adjusted to fit. This could be
+--   iterated, looking for convergence with some attempt
+--   to catch possible cyclic solutions, but for now try this.
+--
+-- TODO: make sure that the output plot area always has a
+-- margin >= _polar_margin pa about it.
+--
+-- At present this does not do the iteration, and only
+-- includes the first step (need to fix a bug in the
+-- textDrawRect function first).
+--
+findPosition ::
+  PolarLayoutAxes r t
+  -> PolarAxesData r t
+  -> PlotBBox
+  -> RectSize
+  -> ChartBackend (Double, Double, Double, Rect)
+findPosition pa adata bbox sz = do
+  -- initial guess
+  ms1 <- guessMargins pa
+  let (cx1, cy1, radius1, brect1) = calculateArea ms1 bbox sz 
+      
+  -- Given this system, do the labels overlap the plot bounding box
+  -- or is there more space?
+  --    
+  let conv   = _polaraxes_viewport adata (cx1,cy1) radius1
+      pconv  = uncurry Point . conv
+      -- scaleR = _polaraxes_r_scale adata radius1
+      -- scaleT = _polaraxes_theta_scale adata
+  
+      (_, rmax) = _polaraxes_r_range adata
+      
+      margin = _polar_margin pa
+
+  -- find the bounding boxes of the labels for the radial axis
+  rls <- withFontStyle (_polar_axes_label_style pa) $ do
+    
+    -- TODO: use thetaLabelOffsets  or maybe need a radialLabelOffsets?
+    forM (_polaraxes_r_labels adata) $ \(r,t,txt) ->
+      let pos = pconv (r,t)
+          -- ang = r2d $ scaleT t -- angle in degrees
+          dx = p_x pos - cx1
+          dy = cy1 - p_y pos
+          rscale = margin / sqrt (dx*dx + dy*dy)
+          lpos = pvadd pos $ Vector (rscale*dx) (rscale*dy)
+      -- There is no textDrawRectR yet, so assume an angle of 0          
+      -- r <- textDrawRectR HTA_Centre VTA_Top ang lpos txt
+      in textDrawRect HTA_Centre VTA_Top lpos txt
+   
+  -- find the bounding boxes of the labels for the theta axis
+  tls <- withFontStyle (_polar_axes_label_style pa) $ do
+    -- theta
+    --
+    -- TODO: should these be rotated?
+    -- TODO: this copies code from drawTextTheta
+    forM (_polaraxes_t_labels adata) $ \(theta,txt) -> 
+      let (lx,ly) = conv (rmax,theta)
+          dx = lx - cx1
+          dy = cy1 - ly -- note: y increases down
+          r  = margin / sqrt (dx*dx + dy*dy)
+          lx' = lx + dx * r
+          ly' = ly - dy * r -- TODO: correct size?
+          (lxoff,lyoff) = thetaLabelOffsets $ atan2 dy dx
+      in textDrawRect lxoff lyoff (Point lx' ly') txt
+
+  let -- find the rectangle that encloses all the rectangles
+      -- defaulting to brect1 if none are given
+      rcombine [] = brect1
+      rcombine rs = foldl1' runion rs
+      
+      -- using min/max or max/min order for the Y coords does not
+      -- work
+      runion :: Rect -> Rect -> Rect
+      runion (Rect (Point ax1 ay1) (Point ax2 ay2))
+             (Rect (Point bx1 by1) (Point bx2 by2))
+        = Rect (Point (min ax1 bx1) (min ay1 by1))
+               (Point (max ax2 bx2) (max ay2 by2))
+  
+      -- Rect (Point rx1 ry1) (Point rx2 ry2) = 
+      brect2 = 
+        rcombine $ rls ++ tls
+        
+  {-
+  -- HACK
+  withLineStyle (solidLine 1 (opaque yellow)) $ 
+    forM_ (rls ++ tls) $ \rect ->
+      alignStrokePath (rectPath rect) >>= strokePath
+
+  return $ (cx1, cy1, radius1, brect2)
+  -}
+      
+  return $ (cx1, cy1, radius1, brect1)
+
 renderPolarLayout :: 
   PolarLayout r t
   -> RectSize
@@ -837,8 +953,15 @@ renderPolarLayout pl sz@(w,h) = do
       points = (concat *** concat) $ unzip $ map _plot_all_points plots
       adata = _polar_axes_generate pa points
       
-  (cx, cy, radius, _, _) <- calculateArea pa adata sz 
-      
+      bbox = calcBBox (_polaraxes_theta_scale adata) (_polaraxes_theta_range adata)
+
+  (cx, cy, radius, brect) <- findPosition pa adata bbox sz    
+  {-
+  -- TODO: this rectangle is for debug purposes only; remove
+  withLineStyle (solidLine 1 (opaque green)) $ 
+    alignStrokePath (rectPath brect) >>= strokePath
+  -}
+  
   -- QUS: would it make sense to do the grid/axis within the clip
   --      region too?
   renderAxesAndGrid (cx,cy) radius pa adata 
