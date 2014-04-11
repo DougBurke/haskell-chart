@@ -133,7 +133,7 @@ import Data.Colour
 import Data.Colour.Names
 import Data.Default.Class
 import Data.List (foldl1')
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Monoid ((<>))
 
 import Graphics.Rendering.Chart.Axis.Internal (scaleLinear, showD)
@@ -147,6 +147,10 @@ import Graphics.Rendering.Chart.Legend
 import Graphics.Rendering.Chart.Plot.Types
 import Graphics.Rendering.Chart.Renderable
 import Graphics.Rendering.Chart.Utils (maximum0, maybeM)
+
+-- The degree symbol
+degSym :: Char
+degSym = chr 176
 
 {-
 NOTES:
@@ -612,14 +616,15 @@ mkLegend mls lm vals = case mls of
                    setPickFn nullPickFn $ legendToRenderable (Legend ls lvs)
 
 -- Use the label \"180\" to guess the margins for the
--- plot, combined with the _polar_margin value.  
+-- plot, combined with the _polar_margin and
+-- _polar_ticklen values        
 guessMargins ::
   PolarLayoutAxes r t
   -> ChartBackend (Double, Double)
 guessMargins pa = do
-  let m = _polar_margin pa
+  let m = _polar_margin pa + _polar_ticklen pa
   (tw,th) <- withFontStyle (_polar_axes_label_style pa) $
-             textDimension "180"
+             textDimension ("180" ++ [degSym])
   return (tw+m, th+m)
   
 -- QUESTION: what is the meaning of this? I'm not sure 
@@ -735,7 +740,13 @@ calculateArea (dx,dy) ((xl,yl),(xh,yh)) (w,h) =
         then (xcen, ycen - ((py - by * radius) / 2))
         else (xcen + ((px - bx * radius) / 2), ycen)
       
-      rect = Rect (Point dx dy) (Point (px+dx) (py+dy))
+      -- important to have y pixel values increasing from first to 
+      -- the second point
+      x1 = cx + xl * radius
+      x2 = cx + xh * radius
+      y1 = cy - yh * radius
+      y2 = cy - yl * radius
+      rect = Rect (Point x1 y1) (Point x2 y2)
   
   in (cx, cy, radius, rect)
   
@@ -838,34 +849,176 @@ calcCardinal tmin tmax =
           then takeWhile (<=z2) cardinal ++ dropWhile (<z1) cardinal
           else takeWhile (<=z2) $ dropWhile (<z1) cardinal
 
+-- TODO: refactor xxxBoundingBoxes and other code that uses this logic
+--
+-- Find the bounding boxes of the labels for the radial axis.
+--
+-- TODO: the boxes should account for the rotation used with these labels
+--
+radialBoundingBoxes ::
+  ((r,t) -> Point)
+  -> (Double,Double)
+  -> Double
+  -> FontStyle
+  -> [(r,t,String)]
+  -> ChartBackend [Rect]
+radialBoundingBoxes pconv (cx,cy) margin lstyle tdata =
+  withFontStyle lstyle $ 
+    -- TODO: use thetaLabelOffsets  or maybe need a radialLabelOffsets?
+    forM tdata $ \(r,t,txt) ->
+      let pos = pconv (r,t)
+          -- ang = r2d $ scaleT t -- angle in degrees
+          dx = p_x pos - cx
+          dy = cy - p_y pos
+          rscale = margin / sqrt (dx*dx + dy*dy)
+          lpos = pvadd pos $ Vector (rscale*dx) (rscale*dy)
+      -- There is no textDrawRectR yet, so assume an angle of 0          
+      -- r <- textDrawRectR HTA_Centre VTA_Top ang lpos txt
+      in textDrawRect HTA_Centre VTA_Top lpos txt
+
+-- find the bounding boxes of the labels for the theta axis
+thetaBoundingBoxes ::
+  ((r,t) -> Point)
+  -> (Double,Double)
+  -> Double
+  -> r
+  -> FontStyle
+  -> [(t,String)]
+  -> ChartBackend [Rect]
+thetaBoundingBoxes pconv (cx,cy) margin rmax lstyle rdata =
+  withFontStyle lstyle $ 
+    -- TODO: this copies code from drawTextTheta
+    forM rdata $ \(theta,txt) -> 
+      let pos = pconv (rmax,theta)
+          dx = p_x pos - cx
+          dy = cy - p_y pos -- note: y increases down
+          rscale = margin / sqrt (dx*dx + dy*dy)
+          (lxoff,lyoff) = thetaLabelOffsets $ atan2 dy dx
+          lpos = pvadd pos $ Vector (rscale*dx) (-rscale*dy)
+      in textDrawRect lxoff lyoff lpos txt
+
+-- Find the rectangle that encloses all the rectangles
+combineRectangles :: [Rect] -> Maybe Rect
+combineRectangles rs = 
+  let runion (Rect (Point ax1 ay1) (Point ax2 ay2))
+             (Rect (Point bx1 by1) (Point bx2 by2))
+        = let -- NOTE: 
+              -- Once we have folded the first pair
+              -- in rs then we know the a values are 
+              -- ordered correctly (e.g. that ax2 >= ax2)
+              -- but we can not take advantage of that
+              -- to simplify things here
+              xs = [ax1, ax2, bx1, bx2]
+              ys = [ay1, ay2, by1, by2]
+          in Rect (Point (minimum xs) (minimum ys))
+                  (Point (maximum xs) (maximum ys))
+        {- If we can guarantee the ordering
+        = Rect (Point (min ax1 bx1) (min ay1 by1))
+               (Point (max ax2 bx2) (max ay2 by2))
+        -}
+  in if null rs then Nothing else Just $ foldl1' runion rs
+
+data PlotChange = 
+  PC 
+  (Maybe Double)
+  -- Shift, in pixels, to apply to the center
+  (Maybe Double)
+  -- Excess, in pixels, that need to be changed by a
+  -- change in the radius (i.e. left over after the
+  -- shift has been applied)
+
+-- Work out the shift/overlap between the border
+-- rectangle and the current plot.
+-- Note that this is intended for shifting/making
+-- the plot smaller; it could, but does not currently,
+-- work to make the plot larger (i.e. if it turns
+-- out there is "spare" space to use).
+--
+compareBorders ::
+  Double
+  -- ^ minimum allowed position
+  -> Double
+  -- ^ maximum allowed position
+  -> Double
+  -- ^ minimum calculated position
+  -> Double
+  -- ^ maximum calculated position
+  -> PlotChange
+compareBorders bmin bmax pmin pmax = 
+  let -- xshift is value to add to the center to make the
+      -- edge x align with the border. If either
+      --    lshift > 0
+      --    rshift < 0
+      -- then the plot overlaps the border.
+      lshift = bmin - pmin
+      rshift = bmax - pmax
+      shift = (lshift + rshift) / 2
+      -- Since this is floating-point equality, this should
+      -- check for a tolerance, or just drop the idea of
+      -- there being a separate indicator for 'no shift'
+      mshift = if shift == 0 then Nothing else Just shift
+      
+      -- What is the overlap after applying the shift?
+      -- If there still is any, need to rescale.
+      lshift' = lshift - shift
+      mscale = if lshift' > 0 then Just lshift' else Nothing
+      
+  in PC mshift mscale
+
+shiftCenter :: 
+  Double
+  -- ^ The current center
+  -> PlotChange
+  -- ^ Result for compareBorders for this axis
+  -> Double
+  -- ^ The new center
+shiftCenter cen (PC Nothing _)   = cen
+shiftCenter cen (PC (Just dc) _) = cen + dc
+      
+rescaleRadius ::                                   
+  (PlotChange, PlotChange)
+  -- ^ The X and Y changes from compareBorders
+  -> (Double, Double)
+  -- ^ The width and height of the plot itself, in
+  --   units of the radius
+  -> Double
+  -- ^ The current radius
+  -> Double
+  -- ^ The new radius value
+rescaleRadius (PC _ Nothing, PC _ Nothing)  _ r = r
+rescaleRadius (PC _ mx, PC _ my) (fx,fy) r = 
+  let -- Calculate the new radius that creates a new
+      -- plot that spans max (2*mx) (2*my) less pixels
+      -- than the original plot (using a 0 if there is
+      -- no shift). The factor of 2 is because the
+      -- overlap is equal - ie on both sides.
+      --       
+      rx = (fx * r - 2 * fromMaybe 0 mx) / fx
+      ry = (fy * r - 2 * fromMaybe 0 my) / fy
+  in min rx ry
+                                   
 -- | Calculate the position and scaling used to draw the
 --   plot based on the available space, label positions,
 --   and data. This is an iterative solution, since you
 --   need to know the scaling to work out the label positions,
 --   and hence margins, but to know the scaling you need
---   to know the position.
+--   to know the position. Here we perform one iteration
+--   but do not check that the calculated values are
+--   sufficient (e.g. due to rounding), since it's not
+--   worth it until it turns out to be a problem.
 --
---   The iterative solution here is *VERY* limited, in that
---   margins are calculated using the max size of the labels,
---   so that an initial position/scale can be found, then
---   this is used to calculate the position of the labels
---   and the margins adjusted to fit. This could be
---   iterated, looking for convergence with some attempt
---   to catch possible cyclic solutions, but for now try this.
---
--- TODO: make sure that the output plot area always has a
--- margin >= _polar_margin pa about it.
---
--- At present this does not do the iteration, and only
--- includes the first step (need to fix a bug in the
--- textDrawRect function first).
+-- NOTE:
+--   the algorithm *always* takes into account the axis
+--   labels even if they are not visible.
 --
 findPosition ::
   PolarLayoutAxes r t
   -> PolarAxesData r t
   -> PlotBBox
   -> RectSize
-  -> ChartBackend (Double, Double, Double, Rect)
+  -> ChartBackend (Double, Double, Double)
+  -- ^ Returns the cx,cy and radius values, in
+  --   device units.
 findPosition pa adata bbox sz = do
   -- initial guess
   ms1 <- guessMargins pa
@@ -876,71 +1029,61 @@ findPosition pa adata bbox sz = do
   --    
   let conv   = _polaraxes_viewport adata (cx1,cy1) radius1
       pconv  = uncurry Point . conv
-      -- scaleR = _polaraxes_r_scale adata radius1
-      -- scaleT = _polaraxes_theta_scale adata
   
       (_, rmax) = _polaraxes_r_range adata
       
       margin = _polar_margin pa
 
-  -- find the bounding boxes of the labels for the radial axis
-  rls <- withFontStyle (_polar_axes_label_style pa) $ do
-    
-    -- TODO: use thetaLabelOffsets  or maybe need a radialLabelOffsets?
-    forM (_polaraxes_r_labels adata) $ \(r,t,txt) ->
-      let pos = pconv (r,t)
-          -- ang = r2d $ scaleT t -- angle in degrees
-          dx = p_x pos - cx1
-          dy = cy1 - p_y pos
-          rscale = margin / sqrt (dx*dx + dy*dy)
-          lpos = pvadd pos $ Vector (rscale*dx) (rscale*dy)
-      -- There is no textDrawRectR yet, so assume an angle of 0          
-      -- r <- textDrawRectR HTA_Centre VTA_Top ang lpos txt
-      in textDrawRect HTA_Centre VTA_Top lpos txt
-   
-  -- find the bounding boxes of the labels for the theta axis
-  tls <- withFontStyle (_polar_axes_label_style pa) $ do
-    -- theta
-    --
-    -- TODO: should these be rotated?
-    -- TODO: this copies code from drawTextTheta
-    forM (_polaraxes_t_labels adata) $ \(theta,txt) -> 
-      let (lx,ly) = conv (rmax,theta)
-          dx = lx - cx1
-          dy = cy1 - ly -- note: y increases down
-          r  = margin / sqrt (dx*dx + dy*dy)
-          lx' = lx + dx * r
-          ly' = ly - dy * r -- TODO: correct size?
-          (lxoff,lyoff) = thetaLabelOffsets $ atan2 dy dx
-      in textDrawRect lxoff lyoff (Point lx' ly') txt
-
-  let -- find the rectangle that encloses all the rectangles
-      -- defaulting to brect1 if none are given
-      rcombine [] = brect1
-      rcombine rs = foldl1' runion rs
+  rls <- radialBoundingBoxes pconv (cx1,cy1) margin
+         (_polar_axes_label_style pa)
+         (_polaraxes_r_labels adata)
+  tls <- thetaBoundingBoxes pconv (cx1,cy1) margin rmax
+         (_polar_axes_label_style pa)
+         (_polaraxes_t_labels adata)
       
-      -- using min/max or max/min order for the Y coords does not
-      -- work
-      runion :: Rect -> Rect -> Rect
-      runion (Rect (Point ax1 ay1) (Point ax2 ay2))
-             (Rect (Point bx1 by1) (Point bx2 by2))
-        = Rect (Point (min ax1 bx1) (min ay1 by1))
-               (Point (max ax2 bx2) (max ay2 by2))
+  {- DEBUG
+  withLineStyle (dashedLine 1 [2,2] (opaque cyan)) $
+    let mRect = Rect (Point msx msy) (Point (fst sz-msx) (snd sz-msy))
+        (msx,msy) = ms1
+    in alignStrokePath (rectPath mRect) >>= strokePath
   
-      -- Rect (Point rx1 ry1) (Point rx2 ry2) = 
-      brect2 = 
-        rcombine $ rls ++ tls
-        
-  {-
-  -- HACK
-  withLineStyle (solidLine 1 (opaque yellow)) $ 
+  withLineStyle (dashedLine 1 [2,4] (opaque blue)) $
+    let mRect = Rect (Point margin margin) (Point (fst sz-margin) (snd sz-margin))
+    in alignStrokePath (rectPath mRect) >>= strokePath
+
+  withLineStyle (solidLine 1 (opaque red)) $
+    alignStrokePath (rectPath brect1) >>= strokePath
+
+  withLineStyle (solidLine 1 (opaque red)) $ 
     forM_ (rls ++ tls) $ \rect ->
       alignStrokePath (rectPath rect) >>= strokePath
-
-  return $ (cx1, cy1, radius1, brect2)
   -}
+  
+  -- combineRectangles is the bounding box of the plot + labels,
+  -- so we can see if it overlaps the bounding box
+  -- defined by _polar_margin_pa and see if a shift
+  -- or rescale is needed.
+  --
+  -- As called we know that combineRectangles always
+  -- returns a Just value, but I can not be bothered
+  -- to use NonEmptyList to encode this constraint
+  -- so leave as is for now.
+  --
+  case combineRectangles (brect1 : rls ++ tls) of
+    
+    Just (Rect (Point rx1 ry1) (Point rx2 ry2)) -> 
+      let xchange = compareBorders margin (fst sz-margin) rx1 rx2
+          ychange = compareBorders margin (snd sz-margin) ry1 ry2
       
-  return $ (cx1, cy1, radius1, brect1)
+          ((fx1,fy1),(fx2,fy2)) = bbox
+          cx2 = shiftCenter cx1 xchange
+          cy2 = shiftCenter cy1 ychange
+          radius2 = rescaleRadius (xchange,ychange)
+                    (fx2-fx1,fy2-fy1) radius1
+                
+      in return (cx2, cy2, radius2)
+         
+    _ -> return (cx1, cy1, radius1)
 
 renderPolarLayout :: 
   PolarLayout r t
@@ -955,12 +1098,7 @@ renderPolarLayout pl sz@(w,h) = do
       
       bbox = calcBBox (_polaraxes_theta_scale adata) (_polaraxes_theta_range adata)
 
-  (cx, cy, radius, brect) <- findPosition pa adata bbox sz    
-  {-
-  -- TODO: this rectangle is for debug purposes only; remove
-  withLineStyle (solidLine 1 (opaque green)) $ 
-    alignStrokePath (rectPath brect) >>= strokePath
-  -}
+  (cx, cy, radius) <- findPosition pa adata bbox sz    
   
   -- QUS: would it make sense to do the grid/axis within the clip
   --      region too?
@@ -1239,7 +1377,7 @@ showThetaLabelDegrees ::
   -> String -- ^ the @&#x03b8;@ value in degrees, including the degrees symbol
 showThetaLabelDegrees n i = 
   let a = 360.0 :: Double
-  in showD (a * fromIntegral i / fromIntegral n) ++ [chr 176]
+  in showD (a * fromIntegral i / fromIntegral n) ++ [degSym]
 
 -- | Convert a theta label value into the string to be displayed.
 -- 
