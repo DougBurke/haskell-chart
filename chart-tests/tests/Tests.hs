@@ -14,8 +14,8 @@ import Data.Char (chr)
 import Data.Colour
 import Data.Colour.Names
 import Data.Colour.SRGB
-import Data.List(sort,nub,scanl1)
 import Data.Default.Class
+import Data.List (sort,nub,scanl1)
 import qualified Data.Map as Map
 import Control.Monad
 import Prices
@@ -389,6 +389,7 @@ misc1 fsz rot lw = fillBackground fwhite $ (gridToRenderable t)
 
 ----------------------------------------------------------------------
 stdSize = (640,480)
+stdSizeV = (480,640) -- for debugging polar plots
 
 allTests :: [ (String, (Int,Int), LineWidth -> Renderable ()) ]
 allTests =
@@ -453,8 +454,8 @@ allTests =
      , ("misc1f", stdSize, setPickFn nullPickFn . misc1 12 270)
      , ("misc1g", stdSize, setPickFn nullPickFn . misc1 12 315)
      , ("parametric", stdSize, \lw -> simple $ TestParametric.chart lw )
-     , ("polar1a", stdSize, const $ simple $ TestPolar.chart1 True False)
-     , ("polar1b", stdSize, const $ simple $ TestPolar.chart1 False True)
+     , ("polar1a", stdSizeV, const $ simple $ TestPolar.chart1 True False)
+     , ("polar1b", stdSizeV, const $ simple $ TestPolar.chart1 False True)
      , ("polar2", stdSize, const $ simple $ TestPolar.chart2 True False)
      , ("polar3", stdSize, const $ simple $ TestPolar.chart3 False True)
      , ("sparklines", TestSparkLines.chartSize, const $ simple TestSparkLines.chart )
