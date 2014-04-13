@@ -42,6 +42,7 @@ module Graphics.Rendering.Chart(
     module Graphics.Rendering.Chart.Drawing,
     module Graphics.Rendering.Chart.Renderable,
     module Graphics.Rendering.Chart.Layout,
+    module Graphics.Rendering.Chart.PolarLayout,
     module Graphics.Rendering.Chart.Axis,
     module Graphics.Rendering.Chart.Plot,
     module Graphics.Rendering.Chart.Legend,
@@ -52,6 +53,7 @@ import Graphics.Rendering.Chart.Geometry
 import Graphics.Rendering.Chart.Drawing
 import Graphics.Rendering.Chart.Renderable
 import Graphics.Rendering.Chart.Layout
+import Graphics.Rendering.Chart.PolarLayout
 import Graphics.Rendering.Chart.Axis
 import Graphics.Rendering.Chart.Plot
 import Graphics.Rendering.Chart.Legend
