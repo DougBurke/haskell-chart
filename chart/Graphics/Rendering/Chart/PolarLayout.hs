@@ -1050,13 +1050,16 @@ $( makeLenses ''PolarLayoutAxes )
 --
 -- This is based on the scatter-plot version from matplotlib,
 -- <http://matplotlib.org/examples/pie_and_polar_charts/polar_scatter_demo.html>.
+-- It is a bit /excessive/ for this document, and will be simplified at some
+-- point.
 --
 -- <<docimages/polar-example1.svg>>
 --
 -- > import qualified Graphics.Rendering.Chart.Backend.Cairo as C
 -- >
+-- > import Control.Applicative ((<$>>))
 -- > import Control.Lens
--- > import Control.Monad (replicateM)
+-- > import Control.Monad (replicateM, void)
 -- > import Data.Colour
 -- > import Data.Colour.Names
 -- > import Data.Default.Class
@@ -1122,14 +1125,15 @@ $( makeLenses ''PolarLayoutAxes )
 -- >   polarlayout_title .~ "Polar plot"
 -- >     $ polarlayout_background .~ bgFill
 -- >     $ polarlayout_plot_background .~ Just pFill
--- >     $ polarlayout_plots .~ lPlot : map toPlot pps
+-- >     $ polarlayout_plots .~ toPlot lPlot : map toPlot pps
 -- >     $ polarlayout_margin .~ 10
 -- >     $ def
 -- > 
 -- > makePlot :: IO ()
 -- > makePlot = do
+-- >   setStdGen $ mkStdGen 49 -- "repeatable" randomness ;-)
 -- >   r <- toRenderable . testPlot <$> makeData cubeHelix0
--- >   _ <- C.renderableToFile (C.FileOptions (400,400) C.SVG) r "polar.svg"
+-- >   void $ C.renderableToFile (C.FileOptions (400,400) C.SVG) r "polar.svg"
 --
 
 -- $notes
