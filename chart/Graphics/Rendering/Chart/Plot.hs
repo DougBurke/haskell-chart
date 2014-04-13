@@ -18,8 +18,7 @@ module Graphics.Rendering.Chart.Plot(
     module Graphics.Rendering.Chart.Plot.Hidden,
     module Graphics.Rendering.Chart.Plot.Annotation,
     module Graphics.Rendering.Chart.Plot.AreaSpots,
-    module Graphics.Rendering.Chart.Plot.Pie,
-    module Graphics.Rendering.Chart.Plot.Polar,
+    module Graphics.Rendering.Chart.Plot.Pie
 ) where
 
 import Graphics.Rendering.Chart.Plot.Types
@@ -33,4 +32,3 @@ import Graphics.Rendering.Chart.Plot.Hidden
 import Graphics.Rendering.Chart.Plot.Annotation
 import Graphics.Rendering.Chart.Plot.AreaSpots
 import Graphics.Rendering.Chart.Plot.Pie
-import Graphics.Rendering.Chart.Plot.Polar

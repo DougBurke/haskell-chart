@@ -89,12 +89,12 @@ import Data.List (foldl1')
 import Data.Maybe (fromMaybe, isJust)
 import Data.Monoid ((<>))
 
+import Graphics.Rendering.Chart.Axis.Polar
 import Graphics.Rendering.Chart.Backend.Types
 import Graphics.Rendering.Chart.Drawing
 import Graphics.Rendering.Chart.Geometry
 import Graphics.Rendering.Chart.Grid (aboveN, besideN, gridToRenderable, tval, weights)
 import Graphics.Rendering.Chart.Legend
-import Graphics.Rendering.Chart.Plot.Polar
 import Graphics.Rendering.Chart.Plot.Types
 import Graphics.Rendering.Chart.Renderable
 import Graphics.Rendering.Chart.Utils (maybeM)
@@ -221,7 +221,7 @@ instance ToRenderable (PolarLayout r t) where
 
 -- | Render the data, axes, and labels.
 --
---   At present the axes are always drawn first, and then the data.
+--   At present the axes and grid are /always/ drawn first, and then the data.
 --
 polarLayoutToRenderable ::
   PolarLayout r t
@@ -1055,13 +1055,6 @@ $( makeLenses ''PolarLayoutAxes )
 --
 -- <<docimages/polar-example1.svg>>
 --
--- Note that, at present, the Diagrams SVG back end is not guaranteed to
--- dispay the filled circles. Hopefully it will be fixed before this code
--- has been fixed up; see <https://github.com/timbod7/haskell-chart/issues/19>
--- for more information (it seems that this has now been fixed so we just need
--- a Chart release (>1.2) to upgrade the lens constraint so that the updated
--- diagrams code can be used).
---
 -- > import qualified Graphics.Rendering.Chart.Backend.Cairo as C
 -- >
 -- > import Control.Lens
@@ -1152,11 +1145,7 @@ $( makeLenses ''PolarLayoutAxes )
 --     seems like it is setting up things like the coordinate conversion
 --     routines too early in the process)
 --
---   - allow theta values to be given in radians or degrees
---
---   - fix up axis positioning and size calculation; this is mainly improving
---     the position of the axis tick labels and including this info in the
---     size calculations.
+--   - improve the label positions
 --
 --   - how much can we generalize to other non-cartesian projections
 --

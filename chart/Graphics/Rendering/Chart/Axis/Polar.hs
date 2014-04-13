@@ -5,20 +5,11 @@
 
 -----------------------------------------------------------------------------
 -- |
--- Module      :  Graphics.Rendering.Chart.Plot.Polar
+-- Module      :  Graphics.Rendering.Chart.Axis.Polar
 -- Copyright   :  (c) Tim Docker 2014
 -- License     :  BSD-style (see chart/COPYRIGHT)
 --
--- Plot data using polar @(r, &#x03b8;)@ coordinates. This should probably be
--- in the @Layout@ or @Axis@ section, but for simplicity it is placed here
--- (some refactoring is currently taking place to make better use of the
--- existing code/functionality).
---
--- I personally am more interested in seeing how to
--- expand Chart to more-complex projections such as those used in
--- Astronomy (<http://www.atnf.csiro.au/people/mcalabre/WCS/>),
--- but there is plenty of complication if we just stick to the
--- Earth (<http://www.progonos.com/furuti/MapProj/Normal/TOC/cartTOC.html>).
+-- Support plotting radial and &#x03b8; coordinates.
 --
 -----------------------------------------------------------------------------
 
@@ -41,7 +32,7 @@
 --
 --  - how to fill an annulus (e.g. circle(x,y,r1)-circle(x,y,r2) with r1>r2)?
 --
-module Graphics.Rendering.Chart.Plot.Polar(
+module Graphics.Rendering.Chart.Axis.Polar(
   
   -- * Symbols
   
@@ -58,7 +49,7 @@ module Graphics.Rendering.Chart.Plot.Polar(
   --    
   , polaraxes_viewport
     
-  -- | These may be removed.  
+  -- | Thee following functions may be removed.  
   , autoScaledAxes
   , showThetaLabelDegrees
   , showThetaLabelRadians
@@ -90,8 +81,9 @@ import Control.Lens
 import Data.Char (chr)
 import Data.Default.Class
 
+import Graphics.Rendering.Chart.Axis.Floating (autoScaledAxis)
 import Graphics.Rendering.Chart.Axis.Internal (scaleLinear, showD)
-import Graphics.Rendering.Chart.Axis (AxisVisibility(..), PlotValue(..), autoScaledAxis)
+import Graphics.Rendering.Chart.Axis.Types (AxisVisibility(..), PlotValue(..))
 import Graphics.Rendering.Chart.Utils (maximum0)
 
 -- The degree symbol
@@ -111,13 +103,13 @@ to the code prior to this rework).
 
 -}
 
--- | What types can be plotted as a pair of polar (r,theta) 
+-- | What types can be plotted as a pair of polar @(r,&#x03b8;)@ 
 --   coordinates.
 --  
 --   /TODO:/  
 --  
 --    - Should there be a radial and theta class
---      which provides a "make xxAxisData" function
+--      which provides a \"make xxAxisData\" function
 --      which can either be used here or replace this
 --      class? The idea is that you can easily write
 --      instances for the same radial type but different  
@@ -350,7 +342,7 @@ data PolarAxesData r t =
   , _polaraxes_theta :: ThetaAxisData t
   , _polaraxes_r_angle :: t
     -- ^ The angle at which the radial axis is drawn
-    --   (used when the _thetaaxis_range field is
+    --   (used when the `_thetaaxis_range` field is
     --    @None@).
   }
 

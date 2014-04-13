@@ -44,6 +44,7 @@ library
         Graphics.Rendering.Chart.Axis.Int
         Graphics.Rendering.Chart.Axis.Internal
         Graphics.Rendering.Chart.Axis.LocalTime
+        Graphics.Rendering.Chart.Axis.Polar
         Graphics.Rendering.Chart.Axis.Types
         Graphics.Rendering.Chart.Axis.Unit
         Graphics.Rendering.Chart.Layout
@@ -61,7 +62,6 @@ library
         Graphics.Rendering.Chart.Plot.Lines
         Graphics.Rendering.Chart.Plot.Pie
         Graphics.Rendering.Chart.Plot.Points
-        Graphics.Rendering.Chart.Plot.Polar
         Graphics.Rendering.Chart.PolarLayout
         Graphics.Rendering.Chart.SparkLine
         Graphics.Rendering.Chart.Backend
