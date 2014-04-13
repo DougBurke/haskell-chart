@@ -1,7 +1,5 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ScopedTypeVariables #-} -- only needed to hide a defaulting warning
-{-# LANGUAGE MultiParamTypeClasses #-} -- for PolarPlotValue
 
 -----------------------------------------------------------------------------
 -- |
