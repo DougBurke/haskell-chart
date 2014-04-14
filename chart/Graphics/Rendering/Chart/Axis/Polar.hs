@@ -350,8 +350,12 @@ data RadialAxisData r =
   RadialAxisData 
   {
     _radialaxis_visibility :: AxisVisibility
-    -- ^ Visibility of the axis components 
-    --   (currently ignored)
+    -- ^ Visibility of the axis components.
+    --
+    --   This is now used, but it is not much use since a user
+    --   can not change this. We need to be able to override
+    --   this (since it may make sense to have a default value
+    --   for a given axis type).
     
   , _radialaxis_scale :: Double -> r -> Double
     -- ^ Convert the radial coordinate to a pixel value. The
@@ -375,8 +379,12 @@ data ThetaAxisData t =
   ThetaAxisData 
   {
     _thetaaxis_visibility :: AxisVisibility
-    -- ^ Visibility of the axis components 
-    --   (currently ignored)
+    -- ^ Visibility of the axis components.
+    --
+    --   This is now used, but it is not much use since a user
+    --   can not change this. We need to be able to override
+    --   this (since it may make sense to have a default value
+    --   for a given axis type).
     
   , _thetaaxis_scale :: t -> Double
     -- ^ Convert the theta coordinate to radians, measured

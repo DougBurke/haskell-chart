@@ -88,6 +88,7 @@ import Data.Maybe (fromMaybe, isJust)
 import Data.Monoid ((<>))
 
 import Graphics.Rendering.Chart.Axis.Polar
+import Graphics.Rendering.Chart.Axis.Types (AxisVisibility(..))
 import Graphics.Rendering.Chart.Backend.Types
 import Graphics.Rendering.Chart.Drawing
 import Graphics.Rendering.Chart.Geometry
@@ -784,6 +785,10 @@ renderAxesAndGrid (cx,cy) radius pa adata mbg bfs = do
   let conv = polaraxes_viewport adata (cx,cy) radius
       raxis = _polaraxes_r adata
       taxis = _polaraxes_theta adata
+      
+      rvis = _radialaxis_visibility raxis
+      tvis = _thetaaxis_visibility taxis
+      
       scaleR = _radialaxis_scale raxis radius
       scaleT = _thetaaxis_scale taxis 
       (rmin, rmax) = _radialaxis_range raxis
@@ -856,6 +861,8 @@ renderAxesAndGrid (cx,cy) radius pa adata mbg bfs = do
       maybeM () (\bp -> withFillStyle bfs (alignFillPath bp >>= fillPath)) mbPath
   
   -- Draw the grid lines
+  --      
+  -- TODO: how do we allow the user to turn these on/off?      
   withLineStyle (_polar_grid_style pa) $ do
     -- constant r
     forM_ (_radialaxis_grid raxis) $ \r -> 
@@ -870,19 +877,23 @@ renderAxesAndGrid (cx,cy) radius pa adata mbg bfs = do
 
   -- theta axis and tick marks
   withLineStyle (_polar_theta_axis_style pa) $ do
-    when (rmin' > 0) $
-      strokePath (arcFn cx cy rmin' tmin' tmax')
-    strokePath (arcFn cx cy radius tmin' tmax')
-    forM_ (_thetaaxis_ticks taxis) $ \theta -> do
-      let p1 = pconv (rmax,theta)
-          p2 = pconv (rmin,theta)
-          v = Vector (dx*r) (dy*r) 
-          dx = p_x p1 - cx
-          dy = p_y p1 - cy
-          r = ticklen / sqrt (dx*dx + dy*dy)
-      alignStrokePoints [p1, pvadd p1 v] >>= strokePointPath
+    
+    when (_axis_show_line tvis) $ do
       when (rmin' > 0) $
-        alignStrokePoints [p2, pvsub p2 v] >>= strokePointPath
+        strokePath (arcFn cx cy rmin' tmin' tmax')
+      strokePath (arcFn cx cy radius tmin' tmax')
+    
+    when (_axis_show_ticks tvis) $ do
+      forM_ (_thetaaxis_ticks taxis) $ \theta -> do
+        let p1 = pconv (rmax,theta)
+            p2 = pconv (rmin,theta)
+            v = Vector (dx*r) (dy*r) 
+            dx = p_x p1 - cx
+            dy = p_y p1 - cy
+            r = ticklen / sqrt (dx*dx + dy*dy)
+        alignStrokePoints [p1, pvadd p1 v] >>= strokePointPath
+        when (rmin' > 0) $
+          alignStrokePoints [p2, pvsub p2 v] >>= strokePointPath
 
   -- radial axis and tick marks
   --
@@ -893,11 +904,14 @@ renderAxesAndGrid (cx,cy) radius pa adata mbg bfs = do
         r = ticklen / sqrt (dx*dx + dy*dy)
         v1 = Vector (dy*r) (dx*r) 
         
-    forM_ rPoints $ alignStrokePoints >=> strokePointPath
-    forM_ (_radialaxis_ticks raxis) $ \rt ->
-      let ps = pconv (rt,rAngle0)
-          pe = pvadd ps v1
-      in alignStrokePoints [ps, pe] >>= strokePointPath
+    when (_axis_show_line rvis) $ 
+      forM_ rPoints $ alignStrokePoints >=> strokePointPath
+      
+    when (_axis_show_ticks rvis) $
+      forM_ (_radialaxis_ticks raxis) $ \rt ->
+        let ps = pconv (rt,rAngle0)
+            pe = pvadd ps v1
+        in alignStrokePoints [ps, pe] >>= strokePointPath
       
     maybeM () (\(_,tmax) -> 
                 let p1' = pconv (rmax, tmax)
@@ -906,10 +920,11 @@ renderAxesAndGrid (cx,cy) radius pa adata mbg bfs = do
                     r' = ticklen / sqrt (dx'*dx' + dy'*dy')
                     v2 = Vector (dy'*r') (dx'*r')
         
-                in forM_ (_radialaxis_ticks raxis) $ \rt ->
-                     let ps = pconv (rt,tmax)
-                         pe = pvsub ps v2
-                     in alignStrokePoints [ps, pe] >>= strokePointPath)
+                in when (_axis_show_ticks rvis) $ 
+                     forM_ (_radialaxis_ticks raxis) $ \rt ->
+                       let ps = pconv (rt,tmax)
+                           pe = pvsub ps v2
+                       in alignStrokePoints [ps, pe] >>= strokePointPath)
       (_thetaaxis_range taxis)
 
   -- axis labels
@@ -923,19 +938,22 @@ renderAxesAndGrid (cx,cy) radius pa adata mbg bfs = do
     -- TODO: use thetaLabelOffsets  or maybe need a radialLabelOffsets?
     let t0 = _polaraxes_r_angle adata
         ang = r2d $ scaleT t0 -- angle in degrees
-    forM_ (_radialaxis_labels raxis) $ \(r,txt) -> 
-      let pos = pconv (r,t0)
-          dx = p_x pos - cx
-          dy = cy - p_y pos
-          rscale = margin / sqrt (dx*dx + dy*dy)
-          lpos = pvadd pos $ Vector (rscale*dx) (rscale*dy)
-      in drawTextR HTA_Centre VTA_Top ang lpos txt
+        
+    when (_axis_show_labels rvis) $
+      forM_ (_radialaxis_labels raxis) $ \(r,txt) -> 
+        let pos = pconv (r,t0)
+            dx = p_x pos - cx
+            dy = cy - p_y pos
+            rscale = margin / sqrt (dx*dx + dy*dy)
+            lpos = pvadd pos $ Vector (rscale*dx) (rscale*dy)
+        in drawTextR HTA_Centre VTA_Top ang lpos txt
    
     -- theta
     --
     -- TODO: should these be rotated?
-    forM_ (_thetaaxis_labels taxis) $ \(theta,txt) -> 
-      drawTextTheta conv (cx,cy) (rmax,theta) margin txt
+    when (_axis_show_labels tvis) $
+      forM_ (_thetaaxis_labels taxis) $ \(theta,txt) -> 
+        drawTextTheta conv (cx,cy) (rmax,theta) margin txt
 
 -- Represent label positions about the polar plot by what "zone" they are
 -- in. The zone is based on quadrants, but I provide special cases for
