@@ -188,7 +188,107 @@ scaleTheta showLabel _ =
 
   in (tickvs, labelvs, gridvs)
 
+-- TODO: use Ord r constraint so we filter the values
+--       to be between min/max?
+--
+mkRadialAxisData ::
+  ScaleRadialAxis r
+  -> (r -> String)
+  -- ^ Create the labels for the axis.
+  -> (Double -> r -> Double)
+  -- ^ Given the plot radius and the radial value, calculate the pixel value.
+  -> (r, r)
+  -- ^ Minimum and maximum values for the radial axis
+  -> [r]
+  -- ^ The radial coordinates to display
+  -> RadialAxisData r
+mkRadialAxisData sra showR convR rngs rs =
+  let (rtickvs, rlabelvs, rgridvs) = sra (5, 5) rngs rs
+  in RadialAxisData { 
+    _radialaxis_visibility = def
+    , _radialaxis_scale = convR
+    , _radialaxis_range = rngs
+    , _radialaxis_ticks = rtickvs
+    , _radialaxis_labels = zip rtickvs $ map showR rlabelvs
+    , _radialaxis_grid = rgridvs
+    }
+
+mkThetaAxisData ::
+  ScaleThetaAxis t
+  -> (t -> Double)
+  -- ^ Convert the theta value to radians.
+  -> Maybe (t, t)
+  -- ^ The theta limits (if the full range is not supported)
+  -> [t]
+  -- ^ The theta coordinates to display
+  -> ThetaAxisData t
+mkThetaAxisData sta scaleT mrngs ts =  
+  let (ttickvs, tlabelvs, tgridvs) = sta ts
+  in ThetaAxisData {
+    _thetaaxis_visibility = def
+    , _thetaaxis_scale = scaleT
+    , _thetaaxis_range = mrngs
+    , _thetaaxis_ticks = ttickvs 
+    , _thetaaxis_labels = tlabelvs
+    , _thetaaxis_grid = tgridvs
+    }
+   
 -- TODO: should this limit the r and theta ranges?
+autoScaledAxes2 :: 
+  (RealFloat r, RealFloat t)
+  => ScaleRadialAxis r
+  -> ScaleThetaAxis t
+  -> Double
+  -- ^ Angle (in radians, measured clockwise from the X axis)
+  --   at which the theta=0 axis is to be drawn
+  -> Bool 
+  -- ^ Is the theta axis reversed?
+  -> ([r],[t])
+  -- ^ (r,theta) values
+  -> PolarAxesData r t
+autoScaledAxes2 scaleR scaleT tZero tRev (rs,ts) = 
+  let rMin = 0 -- TODO: allow rmin /= 0
+      rMaxTmp = maximum0 rs
+      rMax = case rtickvs of
+        [] -> rMaxTmp
+        _ -> maximum rtickvs
+            
+      -- try and remove "problem" positions/values; this is currently
+      -- applied to the radial axis scale routine since it could 
+      -- include values of 0 or less (e.g. if using a routine        
+      -- for a cartesian axis). A better solution would be to        
+      -- type R so that we enforce this constraint in the types,
+      -- but we still might have to filter out r=0 values.        
+      --
+      -- Unfortnuately the abstraction I anm currently using
+      -- means that the scaleR routine is called twice, which
+      -- is not ideal!  
+      --  
+      f0 = filter (>0)
+      g (xs, ys, zs) = (f0 xs, f0 ys, f0 zs)
+      scaleR' a b c = g $ scaleR a b c
+      (rtickvs, _, _) = scaleR' (5,5) (rMin,rMaxTmp) rs 
+       
+      -- scale between user and screen coordinates
+      --
+      -- TODO: sort out nameing between these and scaleT/R arguments to the
+      --       function.
+      thetaScale = if tRev then (tZero +) . realToFrac else (tZero -) . realToFrac
+      radialScale radius r = realToFrac r * radius / realToFrac rMax
+      
+      -- can we use _polar_radial_axis_offset (or move this info
+      -- around so we can use it)?
+      rAngle = d2r (45.0/2)
+
+      raxis = mkRadialAxisData scaleR' showD radialScale (rMin,rMax) rs
+      taxis = mkThetaAxisData scaleT thetaScale Nothing ts
+      
+  in PolarAxesData {
+    _polaraxes_r = raxis
+    , _polaraxes_theta = taxis
+    , _polaraxes_r_angle = rAngle
+    }
+                           
 autoScaledAxes :: 
   (RealFloat r, RealFloat t)
   => ScaleRadialAxis r
@@ -261,7 +361,7 @@ autoScaledAxes scaleR scaleT tZero tRev (rs,ts) =
          
     , _polaraxes_r_angle = rAngle
     }
-                           
+
 -- | A value in radians. 
 --
 --   The only reason for this type (at the moment) is to
