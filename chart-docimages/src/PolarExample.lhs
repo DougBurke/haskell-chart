@@ -4,7 +4,12 @@ This should match the example used in Graphics/Rendering/Chart/PolarLayout.hs
 This is done as a literate file to make it easier to cut and paste
 into the module
 
-> import qualified Graphics.Rendering.Chart.Backend.Cairo as C
+Switching to diagrams for now, as easier to build this back end.
+
+import qualified Graphics.Rendering.Chart.Backend.Cairo as C
+
+> import qualified Data.Map.Lazy as M
+> import qualified Graphics.Rendering.Chart.Backend.Diagrams as D
 >
 > import Control.Applicative ((<$>))
 > import Control.Lens
@@ -82,7 +87,10 @@ into the module
 > makePlot = do
 >   setStdGen $ mkStdGen 49 -- "repeatable" randomness ;-)
 >   r <- toRenderable . testPlot <$> makeData cubeHelix0
->   void $ C.renderableToFile (C.FileOptions (400,400) C.SVG) r "polar-example1.svg"
+>   let fopts = D.FileOptions (400,400) D.SVG M.empty
+>   void $ D.renderableToFile fopts r "polar-example1.svg"
 >
 > main :: IO ()
 > main = makePlot
+
+   void $ C.renderableToFile (C.FileOptions (400,400) C.SVG) r "polar-example1.svg"
